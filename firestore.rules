@@ -1,0 +1,13 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // WARNING: These rules are insecure and allow anyone to read, write, and delete
+    // data in your entire database. This is for temporary debugging only.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

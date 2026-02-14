@@ -1,0 +1,63 @@
+
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Student roster entry with local fingerprint reference.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "rollNo": { "type": "number" },
+        "className": { "type": "string" },
+        "phone": { "type": "string" },
+        "fingerprintID": { "type": "string", "description": "Local ID or 'ENROLLED_ON_PI'" },
+        "attendance": { "type": "object", "description": "Date-indexed attendance status" },
+        "userId": { "type": "string", "description": "Admin user ID for data ownership" }
+      },
+      "required": ["name", "rollNo", "className", "userId"]
+    },
+    "KioskCommand": {
+      "title": "Kiosk Command",
+      "description": "Remote commands sent to the Pi (ENROLL, REBOOT, etc.)",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["ENROLL", "START_SCAN", "REBOOT", "SHUTDOWN", "RESET_PAIRING"] },
+        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
+        "userId": { "type": "string" },
+        "deviceId": { "type": "string", "description": "Pi Serial Number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "SystemStatus": {
+      "title": "System Status",
+      "description": "Heartbeat and health data from the Pi.",
+      "type": "object",
+      "properties": {
+        "cpu_temp": { "type": "number" },
+        "last_online": { "type": "string", "format": "date-time" },
+        "status": { "type": "string" },
+        "hardware_ready": { "type": "boolean" },
+        "templates_stored": { "type": "number" },
+        "userId": { "type": "string", "description": "The linked owner UID" },
+        "pairing_token": { "type": "string", "description": "6-digit token for first-time linking" }
+      }
+    }
+  },
+  "auth": {
+    "providers": ["password", "google"]
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/backend/entities/Student" },
+      "description": "Main student roster."
+    },
+    "/kiosk_commands/{commandId}": {
+      "schema": { "$ref": "#/backend/entities/KioskCommand" },
+      "description": "Queue for remote device actions."
+    },
+    "/system_status/{deviceId}": {
+      "schema": { "$ref": "#/backend/entities/SystemStatus" },
+      "description": "Real-time device health and pairing info. Key is Pi Serial Number."
+    }
+  }
+}
