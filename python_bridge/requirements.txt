@@ -1,0 +1,4 @@
+
+firebase-admin==6.5.0
+pyserial==3.5
+adafruit-circuitpython-fingerprint==2.1.3
