@@ -19,7 +19,8 @@ import {
   ChevronLeft,
   Clock as ClockIcon,
   ShieldCheck,
-  Zap
+  Zap,
+  Link as LinkIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -247,6 +248,29 @@ export default function KioskPage() {
             <ChevronLeft className="h-5 w-5" />
             <span className="text-[10px] font-black uppercase tracking-widest">Back to Home</span>
           </button>
+        )}
+
+        {view === "pairing" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8 animate-in fade-in zoom-in duration-700">
+            <div className="relative">
+                <div className="absolute inset-0 bg-primary/20 blur-[100px] rounded-full animate-pulse" />
+                <div className="relative p-12 bg-slate-900/50 rounded-[3rem] border border-primary/20 shadow-2xl">
+                    <LinkIcon className="h-20 w-20 text-primary animate-pulse" />
+                </div>
+            </div>
+            <div className="space-y-4 px-6">
+                <h2 className="text-4xl font-black text-white italic uppercase tracking-tighter">Device Pairing Required</h2>
+                <p className="text-slate-400 max-w-sm mx-auto font-medium text-lg leading-relaxed">
+                  Enter this token in your Dashboard's <span className="text-primary font-bold italic">Device Center</span> to link this BioSync Box.
+                </p>
+            </div>
+            <div className="bg-primary/10 border border-primary/30 px-16 py-8 rounded-[3rem] shadow-2xl backdrop-blur-3xl group">
+                <span className="text-8xl font-black text-white tracking-[0.4em] font-mono text-glow-white">
+                    {systemStatus?.pairing_token || "------"}
+                </span>
+            </div>
+            <p className="text-white/20 text-[10px] font-black uppercase tracking-[0.5em] animate-pulse">Waiting for synchronization...</p>
+          </div>
         )}
 
         {view === "home" && (
