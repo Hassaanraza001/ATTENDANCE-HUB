@@ -1,6 +1,6 @@
 # Arduino UNO: SIM800L (SMS), AS608 (Fingerprint) aur Buzzer Ko Ek Saath Jodna
 
-Bhai, is guide mein hum dekhenge ki ek hi Arduino UNO se SIM800L, AS608, aur ek Buzzer, teeno ko ek saath kaise connect karein.
+Bhai, is guide mein humne pins ko aapke working test setup ke hisaab se update kiya hai (Fingerprint on Pins 2, 3).
 
 ---
 
@@ -17,59 +17,33 @@ Bhai, is guide mein hum dekhenge ki ek hi Arduino UNO se SIM800L, AS608, aur ek 
 
 ## Part 1: Power Supply Connections (Sabse Zaroori)
 
-SIM800L module ko bahut power chahiye hoti hai, jo Arduino nahi de sakta. Isliye hum iske liye alag se charger istemaal karenge. Fingerprint sensor aur buzzer ko power Arduino se mil sakti hai.
-
-1.  **Mobile Charger Ko Taiyaar Karein:** Apne mobile charger ki USB cable ko aage se kaat lein. Humein sirf **LAL (Red, +5V)** aur **KAALE (Black, Ground)** taar chahiye.
-
-2.  **SIM800L Ko Power Dein:**
-    *   Charger ke **LAL (+) taar** ko SIM800L module ke **`VCC`** pin se jodein.
-    *   Charger ke **KAALE (-) taar** ko SIM800L module ke **`GND`** pin se jodein.
-
-3.  **Common Ground (Bahut Zaroori):** Ek aur jumper wire lein aur **Arduino ke `GND` pin** ko **SIM800L module ke `GND` pin** se jodein. Isse dono devices ka ground ek ho jaata hai.
+1.  **SIM800L Power:** Charger ke **LAL (+) taar** ko `VCC` se aur **KAALE (-) taar** ko `GND` se jodein.
+2.  **Common Ground:** Arduino ke `GND` ko SIM800L ke `GND` se jodein (Dono grounds ek hone chahiye).
 
 ---
 
-## Part 2: Signal Connections (Arduino se sabhi modules)
+## Part 2: Signal Connections (New Working Pinout)
 
-Ab hum Arduino ko sabhi modules se data bhejne aur lene ke liye jodenge.
+#### AS608 (Fingerprint Sensor) - UPDATED:
+Isko ab Pin 2 aur 3 par lagaya gaya hai kyunki yeh testing mein sahi kaam kar raha hai.
+*   Fingerprint Sensor ka **`TX` (Green wire)** <--- **Arduino Digital Pin `2`**
+*   Fingerprint Sensor ka **`RX` (White wire)** <--- **Arduino Digital Pin `3`**
+*   **VCC (Red):** Arduino `3.3V`
+*   **GND (Black):** Arduino `GND`
+
+#### SIM800L (GSM Module) - MOVED:
+Iske pins ko badal kar 4 aur 5 kar diya gaya hai.
+*   SIM800L ka **`TX`** <--- **Arduino Digital Pin `4`**
+*   SIM800L ka **`RX`** <--- **Arduino Digital Pin `5`**
 
 #### Buzzer Connections:
-Isko hum Digital Pin 6 se control karenge.
-*   **Buzzer ka Lamba Taar (+)** <--- **Arduino Digital Pin `6`**
-*   **Buzzer ka Chhota Taar (-)** <--- **Arduino `GND`**
+*   **Buzzer (+) Lamba Taar** <--- **Arduino Digital Pin `6`**
+*   **Buzzer (-) Chhota Taar** <--- **Arduino `GND`**
 
-#### SIM800L (GSM Module) Connections:
-Hum iske liye Pin 2 aur 3 ka istemaal karenge.
-*   **Arduino Digital Pin `2`** <--- **SIM800L `TX`** pin
-*   **Arduino Digital Pin `3`** <--- **SIM800L `RX`** pin
-
-*(Yaad rakhein: Arduino ka RX hamesha module ke TX se judta hai, aur Arduino ka TX hamesha module ke RX se)*
-
-#### AS608 (Fingerprint Sensor) Connections:
-Hum iske liye Pin 4 aur 5 ka istemaal karenge.
-*   **Arduino Digital Pin `4`** <--- Fingerprint Sensor ka **`TX`** pin (Green wire)
-*   **Arduino Digital Pin `5`** <--- Fingerprint Sensor ka **`RX`** pin (White wire)
-
-#### AS608 (Fingerprint Sensor) Power Connections:
-Ise power hum seedhe Arduino se denge.
-*   **Arduino `3.3V`** <--- Fingerprint Sensor ka **`VCC`** pin (Red wire)
-*   **Arduino `GND`** <--- Fingerprint Sensor ka **`GND`** pin (Black wire)
+#### LCD Display (16x2):
+*   RS: Pin 7, EN: Pin 8, D4: Pin 9, D5: Pin 10, D6: Pin 11, D7: Pin 12
 
 ---
 
-### Final Check: Aapka Final Connection Aisa Dikhega
-
-*   **Buzzer (+)** <--- **Arduino Digital Pin `6`**
-*   **Buzzer (-)** <--- **Arduino `GND`**
-
-*   **SIM800L `VCC`** <--- Charger ka **Lal Taar (+5V)**
-*   **SIM800L `GND`** <--- Charger ka **Kaala Taar (GND)** + **Arduino `GND`** (Common Ground)
-*   **SIM800L `TX`** <--- **Arduino Digital Pin `2`**
-*   **SIM800L `RX`** <--- **Arduino Digital Pin `3`**
-
-*   **Fingerprint Sensor `VCC`** (Red) <--- **Arduino `3.3V`**
-*   **Fingerprint Sensor `GND`** (Black) <--- **Arduino `GND`**
-*   **Fingerprint Sensor `TX`** (Green) <--- **Arduino Digital Pin `4`**
-*   **Fingerprint Sensor `RX`** (White) <--- **Arduino Digital Pin `5`**
-
-Is setup ke saath, aapka Arduino teeno cheezon ko control karne ke liye taiyaar hai!
+### Summary:
+Ab aapka fingerprint sensor perfectly detect hona chahiye kyunki code ab wahi pins use kar raha hai jo aapne successfully test kiye hain!

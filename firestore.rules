@@ -1,13 +1,111 @@
-
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // WARNING: These rules are insecure and allow anyone to read, write, and delete
-    // data in your entire database. This is for temporary debugging only.
+
+    /**
+     * ATTEMDANCE MANAGEMENT SYSTEM - SECURITY RULES
+     *
+     * CORE PHILOSOPHY:
+     * This ruleset implements a strict Ownership-Based Access Control model. Every piece of data
+     * (Students, Attendance Records) is hierarchically nested under a specific AppUser document.
+     * Access is granted solely based on the authenticated user's UID matching the parent path ID.
+     *
+     * DATA STRUCTURE:
+     * - /appUsers/{appUserId}: The root profile for teachers/administrators.
+     * - /appUsers/{appUserId}/students/{studentId}: Student records managed by that user.
+     * - /appUsers/{appUserId}/students/{studentId}/attendanceRecords/{recordId}: Individual daily logs.
+     *
+     * KEY SECURITY DECISIONS:
+     * 1. Authorization Independence: We utilize denormalized 'appUserId' fields in subcollections. 
+     *    This allows for fast, O(1) security checks without expensive get() calls to parent documents.
+     * 2. Path-to-Data Consistency: We strictly enforce that the 'appUserId' stored within a document 
+     *    matches the ID in its URL path during creation and remains immutable during updates.
+     * 3. Prototyping Flexibility: Rules do not enforce data types (string, int, etc.) or optional 
+     *    fields, allowing the frontend to evolve rapidly while maintaining hard authorization boundaries.
+     * 4. State Verification: All destructive operations (update/delete) verify document existence 
+     *    before evaluating logic to prevent orphaned requests or logic errors.
+     */
+
+    // --- GLOBAL HELPER FUNCTIONS ---
+
+    /** @description Checks if the request is coming from a logged-in user. */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /** @description Checks if the logged-in user's UID matches the provided userId. */
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /** @description Checks if the user is the owner and the document exists (for updates/deletes). */
+    function isExistingOwner(userId) {
+      return resource != null && isOwner(userId);
+    }
+
+    // --- COLLECTION RULES ---
+
+    /**
+     * @description Rules for the AppUser profile. Users can only manage their own profile.
+     * @path /appUsers/{appUserId}
+     * @allow (create) if auth.uid == "user123" and data.id == "user123"
+     * @deny (get) if auth.uid == "userA" but requesting /appUsers/userB
+     * @principle Self-creation and strict ID-to-path consistency.
+     */
+    match /appUsers/{appUserId} {
+      allow get, list: if isOwner(appUserId);
+      allow create: if isOwner(appUserId) && request.resource.data.id == appUserId;
+      allow update: if isExistingOwner(appUserId) && request.resource.data.id == resource.data.id;
+      allow delete: if isExistingOwner(appUserId);
+
+      /**
+       * @description Rules for Students. Managed exclusively by the parent AppUser.
+       * @path /appUsers/{appUserId}/students/{studentId}
+       * @allow (list) if auth.uid matches the appUserId in the path.
+       * @deny (update) if the student record is being moved to a different appUserId.
+       * @principle Relational integrity via immutable owner IDs.
+       */
+      match /students/{studentId} {
+        allow get, list: if isOwner(appUserId);
+        
+        // Ensure the student document explicitly links to the parent user
+        allow create: if isOwner(appUserId) 
+                      && request.resource.data.appUserId == appUserId;
+        
+        // Prevent changing the managing user (appUserId) during an update
+        allow update: if isExistingOwner(appUserId) 
+                      && request.resource.data.appUserId == resource.data.appUserId;
+        
+        allow delete: if isExistingOwner(appUserId);
+
+        /**
+         * @description Rules for AttendanceRecords. Nested subcollection for granular tracking.
+         * @path /appUsers/{appUserId}/students/{studentId}/attendanceRecords/{attendanceRecordId}
+         * @allow (create) if appUserId and studentId in data match the path context.
+         * @deny (create) if an authenticated user tries to write to another teacher's student.
+         * @principle Multi-level relational integrity validation.
+         */
+        match /attendanceRecords/{attendanceRecordId} {
+          allow get, list: if isOwner(appUserId);
+          
+          // Verify that the record is linked to both the correct user and the correct student
+          allow create: if isOwner(appUserId) 
+                        && request.resource.data.appUserId == appUserId
+                        && request.resource.data.studentId == studentId;
+          
+          // Ensure relational links (user and student) remain immutable
+          allow update: if isExistingOwner(appUserId)
+                        && request.resource.data.appUserId == resource.data.appUserId
+                        && request.resource.data.studentId == resource.data.studentId;
+          
+          allow delete: if isExistingOwner(appUserId);
+        }
+      }
+    }
+
+    // Default deny for any paths not explicitly matched
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
