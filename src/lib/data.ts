@@ -1,12 +1,9 @@
 // =========================================================================================
-// == ARDUINO CODE: BIOMETRIC & SMS - FULL VERSION ==
+// == ARDUINO CODE: BIOMETRIC & SMS - FULL VERSION (UPDATED PINS) ==
 // =========================================================================================
-// This code manages:
-// 1. AS608 Fingerprint Sensor for enrollment and attendance.
-// 2. SIM800L GSM Module for sending SMS notifications.
-// 3. LCD 16x2 Display for status feedback.
-// 4. Buzzer for audio feedback.
-// 5. Serial communication with the Electron desktop app.
+// Updated pin configuration based on successful user test:
+// Fingerprint Sensor: Pins 2 (RX), 3 (TX)
+// GSM Module: Pins 4 (RX), 5 (TX)
 
 // --- LIBRARIES ---
 #include <Adafruit_Fingerprint.h>
@@ -14,13 +11,13 @@
 #include <LiquidCrystal.h> 
 
 // --- PIN CONFIGURATION ---
-// Fingerprint Sensor (using SoftwareSerial)
-#define FINGERPRINT_RX 4 // Connects to Sensor's TX (Green)
-#define FINGERPRINT_TX 5 // Connects to Sensor's RX (White)
+// Fingerprint Sensor (Match working test code)
+#define FINGERPRINT_RX 2 // Connects to Sensor's TX
+#define FINGERPRINT_TX 3 // Connects to Sensor's RX
 
-// GSM Module (using another SoftwareSerial instance)
-#define GSM_RX 2 // Connects to GSM's TX
-#define GSM_TX 3 // Connects to GSM's RX
+// GSM Module (Moved to make room for Fingerprint)
+#define GSM_RX 4 // Connects to GSM's TX
+#define GSM_TX 5 // Connects to GSM's RX
 
 // Buzzer
 #define BUZZER_PIN 6
@@ -49,7 +46,7 @@ void setup() {
   Serial.begin(9600);       
   gsm.begin(9600);          
   finger.begin(57600);      
-  pinMode(BUZZER_PIN, OUTPUT); // Set buzzer pin as output
+  pinMode(BUZZER_PIN, OUTPUT); 
 
   lcd.begin(16, 2); 
   lcd.createChar(0, smiley);
@@ -63,6 +60,7 @@ void setup() {
   lcd.print("System Booting...");
   delay(1500);
 
+  // Verification logic from user's working test
   if (finger.verifyPassword()) {
     lcd.clear();
     lcd.print("Finger Sensor OK");
@@ -147,9 +145,9 @@ void processCommand(String command) {
 void scanFingerForAttendance() {
   int fingerId = getFingerprintID();
   if (fingerId != -1) {
-    digitalWrite(BUZZER_PIN, HIGH); // Turn buzzer ON
-    delay(150); // Beep for 150 milliseconds
-    digitalWrite(BUZZER_PIN, LOW);  // Turn buzzer OFF
+    digitalWrite(BUZZER_PIN, HIGH); 
+    delay(150); 
+    digitalWrite(BUZZER_PIN, LOW);  
 
     lcd.clear();
     lcd.print("Finger Found!");
@@ -158,7 +156,7 @@ void scanFingerForAttendance() {
     lcd.print(fingerId);
     Serial.print("FINGER_SCANNED,");
     Serial.println(fingerId);
-    delay(1500); // Show ID on LCD
+    delay(1500); 
     lcd.clear();
     lcd.print("Scan Finger ");
     lcd.write(byte(3));
@@ -181,7 +179,7 @@ int getFingerprintID() {
 }
 
 void getFingerprintEnroll(int id) {
-  isAttendanceMode = false; // Pause attendance during enrollment
+  isAttendanceMode = false; 
   Serial.print("ENROLL_START,");
   Serial.println(id);
 
@@ -322,7 +320,7 @@ void sendSMS(String number, String text, String recipientName) {
     }
     if (response.indexOf("OK") != -1) {
       Serial.println("SMS_SENT_OK," + recipientName); 
-      delay(5000); // Crucial delay to allow network to process
+      delay(5000); 
       return;
     }
     if (response.indexOf("ERROR") != -1 || response.indexOf("FAIL") != -1) {
@@ -350,5 +348,3 @@ String getValue(String data, char separator, int index) {
   }
   return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
 }
-
-    

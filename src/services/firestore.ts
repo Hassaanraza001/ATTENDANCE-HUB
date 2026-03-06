@@ -1,7 +1,21 @@
 
 import { getDb } from "@/lib/firebase";
-import type { Student, Faculty } from "@/lib/types";
-import { collection, getDocs, addDoc, doc, writeBatch, deleteDoc, updateDoc, query, where, serverTimestamp, setDoc, getDoc, limit } from "firebase/firestore";
+import type { Student, Faculty, UserProfile } from "@/lib/types";
+import { 
+  collection, 
+  getDocs, 
+  addDoc, 
+  doc, 
+  writeBatch, 
+  deleteDoc, 
+  updateDoc, 
+  query, 
+  where, 
+  serverTimestamp, 
+  setDoc, 
+  getDoc, 
+  limit 
+} from "firebase/firestore";
 
 function sanitizeData(data: any) {
   const clean: any = {};
@@ -12,6 +26,23 @@ function sanitizeData(data: any) {
     }
   });
   return clean;
+}
+
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const docRef = doc(getDb(), "appUsers", userId);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    return { id: docSnap.id, ...docSnap.data() } as UserProfile;
+  }
+  return null;
+}
+
+export async function updateUserProfile(userId: string, data: Partial<Omit<UserProfile, 'id' | 'email'>>): Promise<void> {
+  const docRef = doc(getDb(), "appUsers", userId);
+  await setDoc(docRef, { 
+    ...sanitizeData(data), 
+    updatedAt: serverTimestamp() 
+  }, { merge: true });
 }
 
 export async function getOrCreatePairingCode(userId: string): Promise<string> {

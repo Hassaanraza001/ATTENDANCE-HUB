@@ -18,3 +18,12 @@ export interface Faculty {
   role: string;
   userId: string;
 }
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName: string;
+  instituteName: string;
+  phoneNumber: string;
+  updatedAt: any;
+}

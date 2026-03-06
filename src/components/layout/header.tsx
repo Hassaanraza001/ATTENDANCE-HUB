@@ -4,13 +4,11 @@
 import { 
   CalendarCheck, 
   LogOut, 
-  Moon, 
-  Sun, 
-  Laptop, 
   Settings, 
-  Keyboard,
+  ShieldCheck,
   User,
-  LifeBuoy
+  LifeBuoy,
+  RefreshCw
 } from 'lucide-react';
 import * as React from 'react';
 import { Avatar, AvatarFallback } from '../ui/avatar';
@@ -22,42 +20,64 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuPortal,
 } from '@/components/ui/dropdown-menu';
 import { getAuthInstance } from '@/lib/firebase';
-import { useTheme } from 'next-themes';
 import { useToast } from '@/hooks/use-toast';
 
 type HeaderProps = {
   children?: React.ReactNode;
   userEmail?: string | null;
+  onProfileClick?: () => void;
+  userName?: string;
 }
 
-export function Header({ children, userEmail }: HeaderProps) {
-  const { setTheme } = useTheme();
+export function Header({ children, userEmail, onProfileClick, userName }: HeaderProps) {
   const { toast } = useToast();
   const auth = getAuthInstance();
 
-  const getInitials = (email: string) => {
-    if (!email) return 'U';
-    const name = email.split('@')[0];
-    return name.substring(0, 2).toUpperCase();
+  const getInitials = (text: string) => {
+    if (!text) return 'U';
+    return text.substring(0, 2).toUpperCase();
   }
 
-  const showShortcuts = () => {
+  const showDiagnostics = () => {
     toast({
-        title: "System Hotkeys",
+        title: "BioSync OS Diagnostics",
         description: (
-            <ul className="list-disc pl-5 text-[10px] font-bold uppercase tracking-tight">
-                <li><span className="text-primary">Ctrl + S:</span> Start Attendance</li>
-                <li><span className="text-primary">Ctrl + E:</span> End Session</li>
-                <li><span className="text-primary">Ctrl + R:</span> Refresh Database</li>
-            </ul>
+            <div className="space-y-3 p-2 bg-black/20 rounded-lg border border-white/5 font-mono text-[10px] uppercase tracking-tighter mt-2">
+                <div className="flex justify-between border-b border-white/5 pb-1">
+                    <span className="text-muted-foreground">Kernel Status:</span>
+                    <span className="text-emerald-500 font-black">v2.8.5 PRO ACTIVE</span>
+                </div>
+                <div className="flex justify-between border-b border-white/5 pb-1">
+                    <span className="text-muted-foreground">Link Encryption:</span>
+                    <span className="text-primary font-black">AES-256 GCM</span>
+                </div>
+                <div className="flex justify-between border-b border-white/5 pb-1">
+                    <span className="text-muted-foreground">Sync Latency:</span>
+                    <span className="text-emerald-500 font-black">0.42 ms</span>
+                </div>
+                <div className="flex justify-between">
+                    <span className="text-muted-foreground">Security Protocol:</span>
+                    <span className="text-orange-500 font-black">BIO-STRICT v4</span>
+                </div>
+            </div>
         )
     })
+  }
+
+  const handleTerminalSync = () => {
+    toast({
+        title: "Re-Syncing Terminal",
+        description: "Flushing local cache and handshaking with BioSync hardware...",
+    });
+    setTimeout(() => {
+        window.location.reload();
+    }, 1500);
+  }
+
+  const handleReportIssue = () => {
+    window.open('https://forms.gle/vmJvdixfVNzEZrGw5', '_blank');
   }
 
   return (
@@ -79,10 +99,10 @@ export function Header({ children, userEmail }: HeaderProps) {
                 <Settings className="h-5 w-5 text-white/60" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 bg-slate-950 border-white/10 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)]">
+            <DropdownMenuContent align="end" className="w-64 bg-slate-950 border-white/10 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.5)] rounded-2xl">
               <DropdownMenuLabel className="flex items-center gap-3 p-3 mb-2 bg-white/5 rounded-xl border border-white/5">
                  <Avatar className="h-10 w-10 border border-primary/30">
-                   <AvatarFallback className="bg-primary/20 text-primary font-black italic">{getInitials(userEmail || '')}</AvatarFallback>
+                   <AvatarFallback className="bg-primary/20 text-primary font-black italic">{getInitials(userName || userEmail || '')}</AvatarFallback>
                  </Avatar>
                  <div className='flex flex-col min-w-0'>
                     <span className="text-sm font-black text-white italic uppercase tracking-tighter">Account</span>
@@ -90,38 +110,30 @@ export function Header({ children, userEmail }: HeaderProps) {
                  </div>
               </DropdownMenuLabel>
               
-              <DropdownMenuItem className="rounded-lg h-10 gap-3 focus:bg-white/10 transition-all cursor-pointer">
+              <DropdownMenuItem 
+                onClick={onProfileClick}
+                className="rounded-lg h-10 gap-3 focus:bg-white/10 transition-all cursor-pointer"
+              >
                   <User className="h-4 w-4" />
-                  <span className="text-xs font-bold uppercase tracking-widest">Profile</span>
+                  <span className="text-xs font-bold uppercase tracking-widest">Profile Control</span>
               </DropdownMenuItem>
 
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger className="rounded-lg h-10 gap-3 focus:bg-primary/10 focus:text-primary transition-all cursor-pointer">
-                  <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                  <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-                  <span className="text-xs font-bold uppercase tracking-widest">Appearance</span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuPortal>
-                  <DropdownMenuSubContent className="bg-slate-950 border-white/10">
-                    <DropdownMenuItem onClick={() => setTheme("light")} className="gap-3 text-xs font-bold uppercase">
-                      <Sun className="h-4 w-4" /> Light
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTheme("dark")} className="gap-3 text-xs font-bold uppercase">
-                      <Moon className="h-4 w-4" /> Dark
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setTheme("system")} className="gap-3 text-xs font-bold uppercase">
-                      <Laptop className="h-4 w-4" /> System
-                    </DropdownMenuItem>
-                  </DropdownMenuSubContent>
-                </DropdownMenuPortal>
-              </DropdownMenuSub>
+              <DropdownMenuSeparator className="bg-white/5 my-2" />
 
-              <DropdownMenuItem onClick={showShortcuts} className="rounded-lg h-10 gap-3 focus:bg-white/10 transition-all cursor-pointer">
-                  <Keyboard className="h-4 w-4" />
-                  <span className="text-xs font-bold uppercase tracking-widest">Keyboard shortcuts</span>
+              <DropdownMenuItem onClick={showDiagnostics} className="rounded-lg h-10 gap-3 focus:bg-emerald-500/10 focus:text-emerald-400 transition-all cursor-pointer group">
+                  <ShieldCheck className="h-4 w-4 text-emerald-500 group-hover:scale-110 transition-transform" />
+                  <span className="text-xs font-black uppercase tracking-widest">System Diagnostics</span>
               </DropdownMenuItem>
 
-              <DropdownMenuItem className="rounded-lg h-10 gap-3 focus:bg-white/10 transition-all cursor-pointer" onClick={() => toast({ title: "Feedback System", description: "This feature will be available in the next OS update." })}>
+              <DropdownMenuItem onClick={handleTerminalSync} className="rounded-lg h-10 gap-3 focus:bg-primary/10 focus:text-primary transition-all cursor-pointer group">
+                  <RefreshCw className="h-4 w-4 text-primary group-hover:rotate-180 transition-transform duration-500" />
+                  <span className="text-xs font-black uppercase tracking-widest">Terminal Re-Sync</span>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem 
+                className="rounded-lg h-10 gap-3 focus:bg-white/10 transition-all cursor-pointer" 
+                onClick={handleReportIssue}
+              >
                   <LifeBuoy className="h-4 w-4" />
                   <span className="text-xs font-bold uppercase tracking-widest">Report an issue</span>
               </DropdownMenuItem>

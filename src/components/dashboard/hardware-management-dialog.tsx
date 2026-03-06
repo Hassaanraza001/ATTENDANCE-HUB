@@ -24,7 +24,8 @@ import {
   Cpu,
   Activity,
   Zap,
-  AlertTriangle
+  AlertTriangle,
+  ChevronLeft
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getDb } from "@/lib/firebase";
@@ -147,26 +148,35 @@ export function DeviceCenterDialog({ isOpen, onOpenChange, userId }: DeviceCente
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl p-0 overflow-hidden border-none bg-slate-950 shadow-[0_0_100px_rgba(0,0,0,1)] rounded-3xl h-[90vh] flex flex-col">
-        <DialogHeader className="p-10 bg-slate-900 border-b border-white/5 relative overflow-hidden shrink-0">
+      <DialogContent className="sm:max-w-2xl h-[90vh] flex flex-col p-0 overflow-hidden border-none bg-slate-950 shadow-[0_0_100px_rgba(0,0,0,1)] rounded-[3rem] outline-none">
+        <DialogHeader className="p-10 pt-24 bg-slate-900 border-b border-white/5 relative overflow-hidden shrink-0">
           <div className="absolute top-0 right-0 w-48 h-48 bg-primary/5 rounded-full blur-3xl -mr-24 -mt-24" />
-          <div className="relative z-10 flex flex-col gap-2">
+          
+          <button 
+            onClick={() => onOpenChange(false)}
+            className="absolute top-8 left-8 z-[160] h-10 px-4 bg-primary/5 hover:bg-primary/10 border border-primary/10 rounded-xl flex items-center gap-2 text-primary hover:text-primary/80 transition-all active:scale-95 shadow-lg"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span className="text-[10px] font-black uppercase tracking-widest">BACK</span>
+          </button>
+
+          <div className="relative z-10 flex flex-col gap-2 pt-4">
             <div className="flex items-center gap-2 text-primary">
               <Zap className="h-4 w-4 animate-pulse" />
-              <span className="text-[10px] font-black uppercase tracking-[0.5em]">OS Level access</span>
+              <span className="text-[9px] font-black uppercase tracking-[0.5em]">OS Level access</span>
             </div>
-            <DialogTitle className="text-4xl font-black italic tracking-tighter text-white flex items-center gap-4">
+            <DialogTitle className="text-5xl font-black italic tracking-tighter text-white flex items-center gap-4">
               <Terminal className="text-primary h-10 w-10" />
               DEVICE <span className="text-primary">TERMINAL</span>
             </DialogTitle>
-            <DialogDescription className="text-slate-400 font-medium">
+            <DialogDescription className="text-slate-400 font-medium text-base">
               Hardware management and pairing console for BioSync Standalone Units.
             </DialogDescription>
           </div>
         </DialogHeader>
 
         <ScrollArea className="flex-1">
-          <div className="p-10 space-y-10">
+          <div className="p-10 pb-20 space-y-10">
             {!activeDevice ? (
               <div className="space-y-10 py-6">
                  <div className="text-center space-y-4">
@@ -217,9 +227,7 @@ export function DeviceCenterDialog({ isOpen, onOpenChange, userId }: DeviceCente
                 </div>
 
                 <div className="bg-slate-900/50 p-8 rounded-3xl border border-white/5 space-y-3 relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                    <Cpu className="h-16 w-16" />
-                  </div>
+                  <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity"><Cpu className="h-16 w-16" /></div>
                   <p className="text-[10px] font-black uppercase text-slate-500 tracking-[0.4em]">HARDWARE SERIAL IDENTIFIER</p>
                   <div className="flex items-center justify-between">
                       <span className="font-mono text-primary text-2xl font-black italic tracking-tighter">{activeDevice.deviceId}</span>

@@ -4,16 +4,16 @@
 import * as React from "react";
 import { useState, useTransition, useMemo, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
-import type { Student, Faculty } from "@/lib/types";
+import type { Student, Faculty, UserProfile } from "@/lib/types";
 import { 
   updateStudentsAttendance, deleteStudent, addStudent, updateStudent,
-  getFaculties
+  getFaculties, getUserProfile
 } from "@/services/firestore";
 import { format, subDays, isBefore, parseISO } from "date-fns";
 import { getAuthInstance, getDb } from "@/lib/firebase";
 import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, limit } from "firebase/firestore";
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, limit, doc } from "firebase/firestore";
 
 import { Header } from "@/components/layout/header";
 import { AttendanceControls } from "@/components/dashboard/attendance-controls";
@@ -26,6 +26,7 @@ import { DeleteStudentAlert } from "@/components/dashboard/delete-student-alert"
 import { ManageFacultyDialog } from "@/components/dashboard/manage-faculty-dialog";
 import { DeviceCenterDialog } from "@/components/dashboard/hardware-management-dialog";
 import { HistoryAuditDialog } from "@/components/dashboard/history-audit-dialog";
+import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog";
 import { Button } from "@/components/ui/button";
 import { 
   Loader2, 
@@ -55,10 +56,11 @@ import {
   BrainCircuit,
   BellRing,
   CalendarCheck,
-  ShieldAlert
+  ShieldAlert,
+  ChevronLeft
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { 
   Select, 
   SelectContent, 
@@ -164,6 +166,7 @@ export default function DashboardPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [faculties, setFaculties] = useState<Faculty[]>([]);
@@ -176,6 +179,7 @@ export default function DashboardPage() {
   const [isDeviceCenterOpen, setIsDeviceCenterOpen] = useState(false);
   const [isRosterDialogOpen, setIsRosterDialogOpen] = useState(false);
   const [isHistoryAuditOpen, setIsHistoryAuditOpen] = useState(false);
+  const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
   
   const [studentToEnroll, setStudentToEnroll] = useState<Student | null>(null);
   const [setSelectedStudentForCalendar, setSetSelectedStudentForCalendar] = useState<Student | null>(null);
@@ -201,12 +205,27 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchProfile = useCallback(async (userId: string) => {
+    try {
+      const profile = await getUserProfile(userId);
+      setUserProfile(profile);
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+    }
+  }, []);
+
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         fetchFaculty(user.uid);
+        fetchProfile(user.uid);
         
+        // Listen for profile changes
+        const profileUnsub = onSnapshot(doc(db, "appUsers", user.uid), (snap) => {
+          if (snap.exists()) setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
+        });
+
         const qStatus = query(collection(db, "system_status"), where("userId", "==", user.uid), limit(1));
         const statusUnsub = onSnapshot(qStatus, (snap) => {
           if (!snap.empty) setDeviceStatus(snap.docs[0].data());
@@ -234,6 +253,7 @@ export default function DashboardPage() {
         return () => {
           unsubscribeStudents();
           statusUnsub();
+          profileUnsub();
         };
       } else {
         router.push("/login");
@@ -241,7 +261,7 @@ export default function DashboardPage() {
       }
     });
     return () => unsubscribeAuth();
-  }, [router, auth, db, fetchFaculty]);
+  }, [router, auth, db, fetchFaculty, fetchProfile]);
 
   const students = useMemo(() => {
     if (!currentUser) return [];
@@ -363,7 +383,11 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-background selection:bg-primary/30">
-      <Header userEmail={currentUser?.email}>
+      <Header 
+        userEmail={currentUser?.email} 
+        userName={userProfile?.displayName} 
+        onProfileClick={() => setIsProfileDialogOpen(true)}
+      >
         <div className="flex items-center gap-4">
           <Link href="/kiosk" target="_blank">
             <Button variant="outline" size="sm" className="hidden md:flex border-primary/40 text-primary hover:bg-primary hover:text-white rounded-2xl font-black italic uppercase tracking-tighter px-6 h-9 transition-all group">
@@ -433,12 +457,12 @@ export default function DashboardPage() {
                 <span className="text-[9px] font-black uppercase tracking-[0.5em]">Command Hub v2.85 PRO</span>
               </div>
               <h2 className="text-7xl font-black italic tracking-tighter uppercase leading-none text-glow-white">
-                COMMAND <span className="text-primary">CENTER</span>
+                {userProfile?.instituteName?.split(' ')[0] || "COMMAND"} <span className="text-primary">{userProfile?.instituteName?.split(' ').slice(1).join(' ') || "CENTER"}</span>
               </h2>
               <div className="flex items-center gap-3">
                  <div className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
                  <p className="text-muted-foreground text-xs font-bold uppercase tracking-widest">
-                    Authorized Terminal: <span className="text-white">{currentUser?.email}</span>
+                    Authorized Terminal: <span className="text-white">{userProfile?.displayName || currentUser?.email}</span>
                  </p>
               </div>
             </div>
@@ -668,18 +692,27 @@ export default function DashboardPage() {
 
       <Dialog open={isRosterDialogOpen} onOpenChange={setIsRosterDialogOpen}>
         <DialogContent className="max-w-7xl h-[95vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-white/10 shadow-[0_0_100px_rgba(0,0,0,1)] rounded-none">
-          <DialogHeader className="px-10 py-8 border-b border-white/5 bg-slate-900/50 backdrop-blur-3xl relative overflow-hidden">
+          <DialogHeader className="px-10 pt-24 pb-8 border-b border-white/5 bg-slate-900/50 backdrop-blur-3xl relative overflow-hidden shrink-0">
             <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-[100px] -mr-32 -mt-32" />
-            <div className="flex items-center justify-between relative z-10">
+            
+            <button 
+              onClick={() => setIsRosterDialogOpen(false)}
+              className="absolute top-8 left-8 z-[160] h-10 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl flex items-center gap-2 text-white/60 hover:text-white transition-all active:scale-95 shadow-lg"
+            >
+              <ChevronLeft className="h-5 w-5" />
+              <span className="text-[10px] font-black uppercase tracking-widest">BACK</span>
+            </button>
+
+            <div className="flex items-center justify-between relative z-10 pt-4">
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-primary mb-1">
                     <Database className="h-4 w-4" />
                     <span className="text-[9px] font-black uppercase tracking-[0.4em]">Database access</span>
                 </div>
-                <DialogTitle className="text-5xl font-black italic tracking-tighter uppercase text-white">
+                <DialogTitle className="text-4xl font-black italic tracking-tighter uppercase text-white">
                   STUDENT <span className="text-primary">ROSTER</span>
                 </DialogTitle>
-                <p className="text-sm text-muted-foreground font-medium">Manage institution-wide student records and biometric data.</p>
+                <DialogDescription className="text-sm text-muted-foreground font-medium">Manage institution-wide student records and biometric data.</DialogDescription>
               </div>
               <div className="flex items-center gap-4">
                   <Select value={selectedClass} onValueChange={setSelectedClass}>
@@ -766,8 +799,13 @@ export default function DashboardPage() {
         classNames={classNames} 
         onViewProfile={(s) => {
           setSetSelectedStudentForCalendar(s);
-          setIsHistoryAuditOpen(false);
         }}
+      />
+      <ProfileSettingsDialog 
+        isOpen={isProfileDialogOpen} 
+        onOpenChange={setIsProfileDialogOpen} 
+        profile={userProfile} 
+        onRefresh={() => currentUser && fetchProfile(currentUser.uid)} 
       />
       
       <style jsx global>{`

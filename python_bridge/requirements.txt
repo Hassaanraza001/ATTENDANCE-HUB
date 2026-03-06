@@ -1,4 +1,6 @@
 
-firebase-admin==6.5.0
+firebase-admin==6.2.0
+google-cloud-firestore==2.11.1
+grpcio==1.44.0
 pyserial==3.5
 adafruit-circuitpython-fingerprint==2.1.3

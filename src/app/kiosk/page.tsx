@@ -2,8 +2,9 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { format } from "date-fns";
+import { useSearchParams } from "next/navigation";
 import { 
   Fingerprint, 
   CheckCircle2, 
@@ -11,13 +12,10 @@ import {
   Loader2,
   CalendarCheck,
   Cpu,
-  XCircle,
-  ChevronDown,
   Activity,
   Users,
   Database,
   ChevronLeft,
-  Clock as ClockIcon,
   ShieldCheck,
   Zap,
   Link as LinkIcon
@@ -64,29 +62,29 @@ const BootingScreen = () => {
   }, []);
   return (
     <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[200]">
-      <div className="relative mb-6">
-        <div className="absolute inset-0 bg-primary/30 blur-[80px] rounded-full animate-pulse" />
-        <div className="relative p-8 bg-slate-900/50 rounded-full border border-primary/20 shadow-[0_0_50px_-12px_rgba(59,130,246,0.5)]">
-            <CalendarCheck className="h-20 w-20 text-primary animate-bounce" />
+      <div className="relative mb-8">
+        <div className="absolute inset-0 bg-primary/30 blur-[100px] rounded-full animate-pulse" />
+        <div className="relative p-12 bg-slate-900/50 rounded-full border border-primary/20 shadow-2xl">
+            <CalendarCheck className="h-24 w-24 text-primary animate-bounce" />
         </div>
       </div>
-      <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase mb-2 text-glow-white">
+      <h1 className="text-6xl font-black text-white italic tracking-tighter uppercase mb-2 text-glow-white">
         BioSync <span className="text-primary">Box</span>
       </h1>
-      <p className="text-primary/60 font-mono text-[10px] tracking-[0.8em] uppercase font-bold mb-6">OS Kernel v2.8.5.PRO</p>
-      <div className="w-64 space-y-3">
-        <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
-          <div className="h-full bg-primary shadow-[0_0_15px_rgba(59,130,246,1)] transition-all duration-200 rounded-full" style={{ width: `${progress}%` }} />
+      <p className="text-primary/60 font-mono text-xs tracking-[0.8em] uppercase font-bold mb-8">OS KERNEL v2.8.5.PRO</p>
+      <div className="w-80 space-y-4">
+        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
+          <div className="h-full bg-primary shadow-[0_0_20px_rgba(59,130,246,1)] transition-all duration-200 rounded-full" style={{ width: `${progress}%` }} />
         </div>
       </div>
-      <style jsx>{`
-        .text-glow-white { text-shadow: 0 0 30px rgba(255,255,255,0.3); }
-      `}</style>
     </div>
   );
 };
 
-export default function KioskPage() {
+function KioskContent() {
+  const searchParams = useSearchParams();
+  const urlDeviceId = searchParams.get("deviceId");
+  
   const [isBooting, setIsBooting] = useState(true);
   const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing">("processing");
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -109,9 +107,10 @@ export default function KioskPage() {
 
   useEffect(() => {
     const db = getDb();
-    let serial = typeof window !== 'undefined' ? localStorage.getItem("pi_serial_mock") : null;
+    let serial = urlDeviceId;
+    if (!serial && typeof window !== 'undefined') serial = localStorage.getItem("pi_serial_mock");
     if (!serial) {
-        serial = "BS_" + Math.random().toString(36).substr(2, 9).toUpperCase();
+        serial = "PI_" + Math.random().toString(36).substr(2, 6).toUpperCase();
         if (typeof window !== 'undefined') localStorage.setItem("pi_serial_mock", serial);
     }
     setCurrentDeviceId(serial);
@@ -122,28 +121,24 @@ export default function KioskPage() {
         const data = snap.data();
         setSystemStatus(data);
         setCurrentUserId(data.userId);
-        
         if (data.userId) {
           setView(v => (v === "pairing" || v === "processing" ? "home" : v));
           const qCount = query(collection(db, "students"), where("userId", "==", data.userId));
           const countSnap = await getCountFromServer(qCount);
           setStudentCount(countSnap.data().count);
-        } else {
-          setView("pairing");
-        }
-      } else if (serial && serial.startsWith("BS_")) {
+        } else setView("pairing");
+      } else if (serial) {
         setDoc(statusRef, { 
             deviceId: serial, 
             pairing_token: Math.floor(100000 + Math.random() * 900000).toString(), 
             status: "online", 
             last_online: serverTimestamp(), 
             hardware_ready: true, 
-            cpu_temp: 42.5, 
             templates_stored: 0 
         });
       }
     });
-  }, []);
+  }, [urlDeviceId]);
 
   useEffect(() => {
     if (view === "attendance" && currentUserId) {
@@ -165,21 +160,20 @@ export default function KioskPage() {
     }
   }, [view, currentUserId]);
 
+  const handleBack = () => {
+    if (view === "enrollment-step") setView("registration");
+    else if (view === "registration" || view === "attendance") { setView("home"); setActiveInput(null); }
+    else if (activeInput) setActiveInput(null);
+  };
+
   const onKeyPress = (key: string) => {
-    if (key === "CapsLock") {
-      setIsCaps(!isCaps);
-      return;
-    }
+    if (key === "CapsLock") { setIsCaps(!isCaps); return; }
     if (!activeInput) return;
     setRegData(prev => {
       const currentVal = prev[activeInput];
       if (key === "Backspace") return { ...prev, [activeInput]: currentVal.slice(0, -1) };
       if (activeInput === 'phone' && currentVal.length >= 10) return prev;
-      
-      let char = "";
-      if (key === "Space") char = " ";
-      else char = isCaps ? key.toUpperCase() : key.toLowerCase();
-      
+      let char = (key === "Space") ? " " : (isCaps ? key.toUpperCase() : key.toLowerCase());
       const finalChar = /^\d$/.test(key) ? key : char;
       return { ...prev, [activeInput]: currentVal + finalChar };
     });
@@ -188,31 +182,22 @@ export default function KioskPage() {
   const handleRegistration = async () => {
     if (!currentUserId || !currentDeviceId) return;
     if (!regData.name || !regData.rollNo) {
-      toast({ variant: "destructive", title: "Missing Info", description: "Name and Roll No are required." });
+      toast({ variant: "destructive", title: "Input Missing", description: "Name/Roll No required." });
       return;
     }
     try {
       const db = getDb();
       const docRef = await addDoc(collection(db, "students"), {
-        name: regData.name, 
-        rollNo: Number(regData.rollNo), 
-        className: regData.class || "10A", 
-        phone: regData.phone ? `+91${regData.phone}` : "",
-        fingerprintID: "NOT_ENROLLED", 
-        attendance: {}, 
-        userId: currentUserId, 
-        createdAt: serverTimestamp()
+        name: regData.name, rollNo: Number(regData.rollNo), 
+        className: regData.class || "10A", phone: regData.phone ? `+91${regData.phone}` : "",
+        fingerprintID: "NOT_ENROLLED", attendance: {}, userId: currentUserId, createdAt: serverTimestamp()
       });
       await addDoc(collection(db, "kiosk_commands"), {
-        type: "ENROLL", 
-        studentId: docRef.id, 
-        studentName: regData.name, 
-        deviceId: currentDeviceId, 
-        status: "pending", 
-        createdAt: serverTimestamp()
+        type: "ENROLL", studentId: docRef.id, studentName: regData.name, 
+        deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
       });
       setView("enrollment-step");
-    } catch (e) { toast({ variant: "destructive", title: "Error Saving Data" }); }
+    } catch (e) { toast({ variant: "destructive", title: "DB Error" }); }
   };
 
   if (isBooting) return <BootingScreen />;
@@ -220,116 +205,116 @@ export default function KioskPage() {
   return (
     <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950")}>
       
-      <div className="h-9 px-4 flex justify-between items-center bg-slate-900/80 border-b border-white/10 backdrop-blur-xl z-[100]">
-        <div className="flex items-center gap-2">
-            <CalendarCheck className="h-4 w-4 text-primary" />
-            <span className="font-black text-[14px] tracking-tight text-white uppercase italic">
+      {/* MEGA HEADER: Scaled for hardware screen */}
+      <div className="h-32 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
+        <div className="flex items-center gap-10">
+            <div className="p-4 bg-primary/10 rounded-[2rem] border border-primary/20">
+                <CalendarCheck className="h-16 w-16 text-primary" />
+            </div>
+            <span className="font-black text-6xl tracking-tighter text-white uppercase italic">
                 BioSync <span className="text-primary">Box</span>
             </span>
         </div>
-        <div className="flex items-center gap-6">
-           <div className="flex items-center gap-2">
-              <div className={cn("h-1.5 w-1.5 rounded-full", systemStatus?.status === 'online' ? "bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,1)]" : "bg-rose-500")} />
-              <span className="text-[9px] font-black text-white/50 uppercase tracking-widest">
-                {isBooting ? "Booting" : (systemStatus?.status || "Offline")}
+        <div className="flex items-center gap-16">
+           <div className="flex items-center gap-8 bg-black/40 px-10 py-5 rounded-[2.5rem] border border-white/5">
+              <div className={cn("h-6 w-6 rounded-full", systemStatus?.status === 'online' ? "bg-emerald-500 animate-pulse shadow-[0_0_20px_rgba(16,185,129,1)]" : "bg-rose-500")} />
+              <span className="text-3xl font-black text-white uppercase tracking-[0.2em]">
+                {systemStatus?.status || "OFFLINE"}
               </span>
            </div>
-           <div className="font-mono text-[12px] font-bold text-white tracking-widest">{format(currentTime, "HH:mm:ss")}</div>
+           <div className="font-mono text-6xl font-bold text-white tracking-widest bg-primary/10 px-12 py-5 rounded-[2.5rem] border border-primary/20 shadow-2xl">
+             {format(currentTime, "HH:mm")}
+           </div>
         </div>
       </div>
 
-      <div className="flex-1 relative flex flex-col items-center overflow-hidden">
+      <div className="flex-1 relative flex flex-col items-center justify-center">
         
         {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success") && (
           <button 
-            onClick={() => { setView("home"); setActiveInput(null); }}
-            className="absolute top-4 left-4 z-[160] h-10 px-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl flex items-center gap-2 text-white/60 hover:text-white transition-all active:scale-95"
+            onClick={handleBack}
+            className="absolute top-10 left-12 z-[160] h-24 px-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[3rem] flex items-center gap-8 text-white transition-all active:scale-95 shadow-2xl"
           >
-            <ChevronLeft className="h-5 w-5" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Back to Home</span>
+            <ChevronLeft className="h-14 w-14" />
+            <span className="text-2xl font-black uppercase tracking-[0.3em]">BACK</span>
           </button>
         )}
 
         {view === "pairing" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8 animate-in fade-in zoom-in duration-700">
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20 p-12">
             <div className="relative">
-                <div className="absolute inset-0 bg-primary/20 blur-[100px] rounded-full animate-pulse" />
-                <div className="relative p-12 bg-slate-900/50 rounded-[3rem] border border-primary/20 shadow-2xl">
-                    <LinkIcon className="h-20 w-20 text-primary animate-pulse" />
+                <div className="absolute inset-0 bg-primary/20 blur-[150px] rounded-full animate-pulse" />
+                <div className="relative p-20 bg-slate-900/50 rounded-[6rem] border border-primary/20 shadow-2xl">
+                    <LinkIcon className="h-40 w-40 text-primary animate-pulse" />
                 </div>
             </div>
-            <div className="space-y-4 px-6">
-                <h2 className="text-4xl font-black text-white italic uppercase tracking-tighter">Device Pairing Required</h2>
-                <p className="text-slate-400 max-w-sm mx-auto font-medium text-lg leading-relaxed">
-                  Enter this token in your Dashboard's <span className="text-primary font-bold italic">Device Center</span> to link this BioSync Box.
+            <div className="space-y-10">
+                <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter">Pair Device</h2>
+                <p className="text-slate-400 text-4xl font-medium max-w-4xl leading-relaxed">
+                  Enter token in Dashboard <span className="text-primary italic font-bold">Device Center</span>
                 </p>
             </div>
-            <div className="bg-primary/10 border border-primary/30 px-16 py-8 rounded-[3rem] shadow-2xl backdrop-blur-3xl group">
-                <span className="text-8xl font-black text-white tracking-[0.4em] font-mono text-glow-white">
+            
+            <div className="bg-primary/10 border-2 border-primary/30 px-32 py-20 rounded-[6rem] shadow-[0_0_150px_rgba(59,130,246,0.3)]">
+                <span className="text-[12rem] font-black text-white tracking-[0.2em] font-mono leading-none block text-glow-white">
                     {systemStatus?.pairing_token || "------"}
                 </span>
             </div>
-            <p className="text-white/20 text-[10px] font-black uppercase tracking-[0.5em] animate-pulse">Waiting for synchronization...</p>
           </div>
         )}
 
         {view === "home" && (
-          <div className="w-full h-full flex flex-col items-center justify-between py-4 px-6 animate-in fade-in duration-1000">
-            <div className="text-center space-y-0 mt-2">
-                <div className="text-8xl font-black text-white tracking-tighter italic leading-none text-glow-white">
+          <div className="w-full h-full flex flex-col items-center justify-between py-24 px-12 animate-in fade-in duration-1000">
+            <div className="text-center">
+                <div className="text-[240px] font-black text-white tracking-tighter italic leading-none text-glow-white">
                     {format(currentTime, "HH:mm")}
                 </div>
-                <div className="text-lg font-bold text-primary uppercase tracking-[0.5em] mt-1">
+                <div className="text-6xl font-bold text-primary uppercase tracking-[0.6em] mt-16">
                     {format(currentTime, "EEEE, MMM do")}
                 </div>
             </div>
 
-            <div className="flex gap-6 w-full max-w-3xl px-2">
+            <div className="flex gap-20 w-full max-w-[1600px]">
                 <button 
                     onClick={() => setView("attendance")} 
-                    className="group relative flex-1 h-32 bg-slate-900/60 border border-white/10 hover:border-primary/50 rounded-[2rem] flex flex-col items-center justify-center gap-3 transition-all active:scale-95 shadow-2xl overflow-hidden"
+                    className="group relative flex-1 h-[450px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[6rem] flex flex-col items-center justify-center gap-16 transition-all active:scale-95 shadow-2xl"
                 >
-                    <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors" />
-                    <Fingerprint className="h-12 w-12 text-primary group-hover:scale-110 transition-all drop-shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
-                    <span className="text-2xl font-black text-white uppercase italic tracking-tighter">Attendance</span>
+                    <div className="p-12 bg-primary/10 rounded-full border border-primary/20 group-hover:scale-110 transition-transform">
+                        <Fingerprint className="h-48 w-40 text-primary drop-shadow-[0_0_50px_rgba(59,130,246,0.8)]" />
+                    </div>
+                    <span className="text-8xl font-black text-white uppercase italic tracking-tighter">Attendance</span>
                 </button>
                 <button 
                     onClick={() => { setRegData({name: "", rollNo: "", class: "", phone: ""}); setView("registration"); }} 
-                    className="group relative flex-1 h-32 bg-slate-900/60 border border-white/10 hover:border-emerald-500/50 rounded-[2rem] flex flex-col items-center justify-center gap-3 transition-all active:scale-95 shadow-2xl overflow-hidden"
+                    className="group relative flex-1 h-[450px] bg-slate-900/60 border-4 border-white/10 hover:border-emerald-500/50 rounded-[6rem] flex flex-col items-center justify-center gap-16 transition-all active:scale-95 shadow-2xl"
                 >
-                    <div className="absolute inset-0 bg-emerald-500/5 group-hover:bg-emerald-500/10 transition-colors" />
-                    <UserPlus className="h-12 w-12 text-emerald-500 group-hover:scale-110 transition-all drop-shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
-                    <span className="text-2xl font-black text-white uppercase italic tracking-tighter">Register</span>
+                    <div className="p-12 bg-emerald-500/10 rounded-full border border-emerald-500/20 group-hover:scale-110 transition-transform">
+                        <UserPlus className="h-48 w-40 text-emerald-500 drop-shadow-[0_0_50px_rgba(16,185,129,0.8)]" />
+                    </div>
+                    <span className="text-8xl font-black text-white uppercase italic tracking-tighter">Register</span>
                 </button>
             </div>
 
-            <div className="w-full bg-slate-900/40 border border-white/5 rounded-2xl p-3 grid grid-cols-4 gap-4 backdrop-blur-md">
-                <div className="flex items-center gap-3 border-r border-white/5 pr-4">
-                    <Users className="h-4 w-4 text-primary" />
+            <div className="w-full max-w-[1600px] bg-slate-900/40 border-2 border-white/10 rounded-[5rem] p-16 grid grid-cols-3 gap-20 backdrop-blur-md">
+                <div className="flex items-center gap-10 border-r border-white/10">
+                    <Users className="h-24 w-24 text-primary" />
                     <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-white/30 uppercase tracking-widest">STUDENTS</span>
-                        <span className="text-xs font-bold text-white">{studentCount} ENROLLED</span>
+                        <span className="text-2xl font-black text-white/30 uppercase tracking-widest">STUDENTS</span>
+                        <span className="text-5xl font-bold text-white">{studentCount} IDs</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-3 border-r border-white/5 pr-4">
-                    <Activity className="h-4 w-4 text-emerald-500" />
+                <div className="flex items-center gap-10 border-r border-white/10">
+                    <Database className="h-24 w-24 text-orange-500" />
                     <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-white/30 uppercase tracking-widest">THERMAL</span>
-                        <span className="text-xs font-bold text-white">{systemStatus?.cpu_temp?.toFixed(1) || "--"}°C</span>
+                        <span className="text-2xl font-black text-white/30 uppercase tracking-widest">STORAGE</span>
+                        <span className="text-5xl font-bold text-white">{systemStatus?.templates_stored || 0} DAT</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-3 border-r border-white/5 pr-4">
-                    <Database className="h-4 w-4 text-orange-500" />
+                <div className="flex items-center gap-10">
+                    <Zap className="h-24 w-24 text-indigo-400 animate-pulse" />
                     <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-white/30 uppercase tracking-widest">BIOMETRIC</span>
-                        <span className="text-xs font-bold text-white">{systemStatus?.templates_stored || 0} STORED</span>
-                    </div>
-                </div>
-                <div className="flex items-center gap-3">
-                    <Zap className="h-4 w-4 text-indigo-400 animate-pulse" />
-                    <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-white/30 uppercase tracking-widest">STATUS</span>
-                        <span className="text-xs font-bold text-indigo-400">ACTIVE</span>
+                        <span className="text-2xl font-black text-white/30 uppercase tracking-widest">KERNEL</span>
+                        <span className="text-5xl font-bold text-indigo-400 uppercase italic">ACTIVE</span>
                     </div>
                 </div>
             </div>
@@ -337,82 +322,43 @@ export default function KioskPage() {
         )}
 
         {view === "registration" && (
-            <div className={cn("w-full h-full flex flex-col transition-all duration-500", activeInput && "-translate-y-24")}>
-                <div className="flex-1 flex flex-col items-center justify-center p-4">
-                    <div className="w-full max-w-2xl bg-slate-900/70 backdrop-blur-3xl p-6 rounded-[2.5rem] border border-white/10 shadow-2xl">
-                        <h2 className="text-2xl font-black italic uppercase text-primary mb-6 tracking-widest text-center">Student Registration</h2>
-                        
-                        <div className="grid grid-cols-2 gap-3">
-                            <div 
-                                onClick={() => setActiveInput("name")} 
-                                className={cn("col-span-2 px-6 py-3 rounded-2xl border transition-all cursor-pointer", activeInput === "name" ? "border-primary bg-primary/10 shadow-lg" : "border-white/5 bg-white/5")}
-                            >
-                                <label className="text-[9px] font-black uppercase text-white/40 block tracking-widest mb-1">NAME</label>
-                                <div className="text-2xl font-bold truncate h-8 flex items-center">{regData.name || "---"}</div>
+            <div className={cn("w-full h-full flex flex-col transition-all duration-500", activeInput && "-translate-y-64")}>
+                <div className="flex-1 flex flex-col items-center justify-center p-12">
+                    <div className="w-full max-w-[1400px] bg-slate-900/80 backdrop-blur-3xl p-24 rounded-[6rem] border-2 border-white/10 shadow-2xl">
+                        <h2 className="text-8xl font-black italic uppercase text-primary mb-24 tracking-widest text-center border-b-2 border-white/5 pb-16">Enroll Student</h2>
+                        <div className="grid grid-cols-2 gap-16">
+                            <div onClick={() => setActiveInput("name")} className={cn("col-span-2 px-20 py-12 rounded-[4rem] border-4 transition-all cursor-pointer", activeInput === "name" ? "border-primary bg-primary/10 shadow-[0_0_50px_rgba(59,130,246,0.2)]" : "border-white/5 bg-white/5")}>
+                                <label className="text-2xl font-black uppercase text-white/40 block tracking-widest mb-6">FULL NAME</label>
+                                <div className="text-7xl font-bold truncate h-24 flex items-center">{regData.name || "---"}</div>
                             </div>
-                            <div 
-                                onClick={() => setActiveInput("rollNo")} 
-                                className={cn("px-6 py-3 rounded-2xl border transition-all cursor-pointer", activeInput === "rollNo" ? "border-primary bg-primary/10 shadow-lg" : "border-white/5 bg-white/5")}
-                            >
-                                <label className="text-[9px] font-black uppercase text-white/40 block tracking-widest mb-1">ROLL NO</label>
-                                <div className="text-2xl font-bold h-8 flex items-center">{regData.rollNo || "00"}</div>
+                            <div onClick={() => setActiveInput("rollNo")} className={cn("px-20 py-12 rounded-[4rem] border-4 transition-all cursor-pointer", activeInput === "rollNo" ? "border-primary bg-primary/10 shadow-[0_0_50px_rgba(59,130,246,0.2)]" : "border-white/5 bg-white/5")}>
+                                <label className="text-2xl font-black uppercase text-white/40 block tracking-widest mb-6">ROLL NO</label>
+                                <div className="text-7xl font-bold h-24 flex items-center">{regData.rollNo || "00"}</div>
                             </div>
-                            <div 
-                                onClick={() => setActiveInput("class")} 
-                                className={cn("px-6 py-3 rounded-2xl border transition-all cursor-pointer", activeInput === "class" ? "border-primary bg-primary/10 shadow-lg" : "border-white/5 bg-white/5")}
-                            >
-                                <label className="text-[9px] font-black uppercase text-white/40 block tracking-widest mb-1">CLASS</label>
-                                <div className="text-2xl font-bold h-8 flex items-center">{regData.class || "10A"}</div>
-                            </div>
-                            <div 
-                                onClick={() => setActiveInput("phone")} 
-                                className={cn("col-span-2 px-6 py-3 rounded-2xl border transition-all cursor-pointer", activeInput === "phone" ? "border-primary bg-primary/10 shadow-lg" : "border-white/5 bg-white/5")}
-                            >
-                                <label className="text-[9px] font-black uppercase text-white/40 block tracking-widest mb-1">PARENT MOBILE (+91)</label>
-                                <div className="text-2xl font-bold h-8 flex items-center tracking-widest">{regData.phone || "---"}</div>
+                            <div onClick={() => setActiveInput("class")} className={cn("px-20 py-12 rounded-[4rem] border-4 transition-all cursor-pointer", activeInput === "class" ? "border-primary bg-primary/10 shadow-[0_0_50px_rgba(59,130,246,0.2)]" : "border-white/5 bg-white/5")}>
+                                <label className="text-2xl font-black uppercase text-white/40 block tracking-widest mb-6">CLASS</label>
+                                <div className="text-7xl font-bold h-24 flex items-center">{regData.class || "10A"}</div>
                             </div>
                         </div>
-
                         {!activeInput && (
-                            <Button onClick={handleRegistration} className="w-full h-16 mt-6 text-2xl font-black bg-emerald-600 hover:bg-emerald-500 rounded-2xl uppercase italic tracking-tighter shadow-xl">
-                                Initialize Enrollment
+                            <Button onClick={handleRegistration} className="w-full h-40 mt-24 text-7xl font-black bg-emerald-600 hover:bg-emerald-500 rounded-[4.5rem] uppercase italic tracking-tighter shadow-2xl transition-all active:scale-95">
+                                Start Biometric Scan
                             </Button>
                         )}
                     </div>
                 </div>
 
-                <div className={cn(
-                    "fixed bottom-0 left-0 right-0 bg-[#020617]/98 backdrop-blur-3xl border-t border-white/10 p-4 transition-all duration-500 transform z-[150]",
-                    activeInput ? "translate-y-0" : "translate-y-full"
-                )}>
-                    <div className="flex justify-between items-center mb-3 px-6">
-                        <span className="text-[10px] font-black text-primary uppercase tracking-[0.4em]">
-                            INPUT: <span className="text-white">{activeInput?.toUpperCase()}</span>
-                        </span>
-                        <button onClick={() => setActiveInput(null)} className="flex items-center gap-1 text-[10px] font-black text-white/60 uppercase tracking-widest bg-white/5 px-4 py-2 rounded-full border border-white/10">
-                            DONE <ChevronDown className="h-4 w-4" />
-                        </button>
+                <div className={cn("fixed bottom-0 left-0 right-0 bg-slate-950/98 backdrop-blur-3xl border-t-2 border-white/10 p-16 transition-all duration-500 z-[150]", activeInput ? "translate-y-0" : "translate-y-full")}>
+                    <div className="flex justify-between items-center mb-12">
+                        <span className="text-4xl font-black text-primary uppercase tracking-[0.5em]">INPUT: <span className="text-white">{activeInput?.toUpperCase()}</span></span>
+                        <button onClick={() => setActiveInput(null)} className="h-20 px-16 bg-emerald-600 rounded-full font-black text-3xl uppercase text-white shadow-2xl">CONFIRM</button>
                     </div>
-                    
-                    <div className="flex flex-col gap-2 max-w-5xl mx-auto">
-                        {(activeInput === 'rollNo' || activeInput === 'phone' ? NUMPAD_LAYOUT : KEYBOARD_LAYOUT).map((row, i) => (
-                        <div key={i} className="flex justify-center gap-2 w-full">
+                    <div className="flex flex-col gap-8 max-w-[1600px] mx-auto">
+                        {(activeInput === 'rollNo' ? NUMPAD_LAYOUT : KEYBOARD_LAYOUT).map((row, i) => (
+                        <div key={i} className="flex justify-center gap-8">
                             {row.map(key => (
-                            <button 
-                                key={key} 
-                                onClick={() => onKeyPress(key)} 
-                                className={cn(
-                                    "h-12 flex-1 min-w-[3.5rem] rounded-xl text-[18px] font-black transition-all active:scale-90 border border-white/5",
-                                    key === "Backspace" ? "bg-rose-500/20 text-rose-500 border-rose-500/30" : 
-                                    key === "CapsLock" ? cn("bg-indigo-500/20 text-indigo-400 border-indigo-500/30", isCaps && "bg-indigo-500 text-white") :
-                                    key === "Space" ? "bg-white/10 text-white flex-[4]" :
-                                    "bg-white/10 text-white"
-                                )}
-                            >
-                                {key === "Backspace" ? "DEL" : 
-                                 key === "CapsLock" ? (isCaps ? "ABC" : "abc") :
-                                 key === "Space" ? "SPACE" :
-                                 isCaps && !/^\d$/.test(key) ? key.toUpperCase() : key.toLowerCase()}
+                            <button key={key} onClick={() => onKeyPress(key)} className={cn("h-28 flex-1 min-w-[8rem] rounded-[2.5rem] text-5xl font-black transition-all active:scale-90", key === "Backspace" ? "bg-rose-500 text-white" : key === "CapsLock" ? cn("bg-indigo-500/20 text-indigo-400", isCaps && "bg-indigo-500 text-white") : "bg-white/10 text-white hover:bg-white/20 border border-white/5 shadow-xl")}>
+                                {key === "Backspace" ? "DEL" : key === "CapsLock" ? "ABC" : key === "Space" ? "SPACE" : isCaps ? key.toUpperCase() : key.toLowerCase()}
                             </button>
                             ))}
                         </div>
@@ -423,43 +369,45 @@ export default function KioskPage() {
         )}
 
         {view === "attendance" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-10 animate-in zoom-in duration-500">
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-24 animate-in zoom-in duration-500">
             <div className="relative">
-                <div className="absolute inset-0 bg-primary/30 blur-[120px] rounded-full animate-pulse" />
-                <div className="relative bg-primary/10 p-16 rounded-full border-[10px] border-primary/20 shadow-[0_0_80px_-10px_rgba(59,130,246,0.5)]">
-                    <Fingerprint className="h-44 w-44 text-primary animate-pulse" />
-                    <div className="absolute top-0 left-0 w-full h-[3px] bg-primary shadow-[0_0_30px_rgba(59,130,246,1)] animate-scan-line" />
+                <div className="absolute inset-0 bg-primary/30 blur-[200px] rounded-full animate-pulse" />
+                <div className="relative bg-primary/10 p-56 rounded-full border-[30px] border-primary/20 shadow-2xl">
+                    <Fingerprint className="h-[400px] w-[400px] text-primary animate-pulse" />
+                    <div className="absolute top-0 left-0 w-full h-[15px] bg-primary shadow-[0_0_100px_rgba(59,130,246,1)] animate-scan-line" />
                 </div>
             </div>
-            <div className="space-y-4">
-                <h1 className="text-6xl font-black text-white italic uppercase tracking-tighter">Scan Finger</h1>
-                <div className="flex items-center justify-center gap-3">
-                    <ShieldCheck className="h-6 w-6 text-emerald-500" />
-                    <p className="text-primary font-mono text-[14px] tracking-[0.6em] uppercase font-black animate-pulse">Bio-Identity Verification</p>
+            <div className="space-y-12">
+                <h1 className="text-[14rem] font-black text-white italic uppercase tracking-tighter leading-none">Scan Finger</h1>
+                <div className="flex items-center justify-center gap-12 bg-white/5 px-16 py-8 rounded-full border border-white/10">
+                    <ShieldCheck className="h-20 w-24 text-emerald-500" />
+                    <p className="text-primary font-mono text-4xl tracking-[0.8em] uppercase font-black animate-pulse">Bio-Identity Active</p>
                 </div>
             </div>
           </div>
         )}
 
         {view === "success" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8 animate-in zoom-in duration-700">
-            <div className="bg-emerald-500 p-12 rounded-full scale-110 shadow-[0_0_100px_rgba(16,185,129,0.5)] border-[12px] border-emerald-400/40">
-                <CheckCircle2 className="h-44 w-44 text-white" />
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-24 animate-in zoom-in duration-700">
+            <div className="bg-emerald-500 p-40 rounded-full scale-110 shadow-[0_0_200px_rgba(16,185,129,0.6)] border-[30px] border-emerald-400/40">
+                <CheckCircle2 className="h-[350px] w-[350px] text-white" />
             </div>
-            <div className="space-y-3">
-                <h2 className="text-7xl font-black text-white italic tracking-tighter leading-none text-glow-emerald uppercase">PRESENT</h2>
-                <p className="text-4xl text-emerald-300 font-black uppercase tracking-widest">{lastStudent?.name}</p>
+            <div className="space-y-12">
+                <h2 className="text-[16rem] font-black text-white italic tracking-tighter leading-none uppercase text-glow-emerald">PRESENT</h2>
+                <p className="text-[9rem] text-emerald-300 font-black uppercase tracking-[0.3em]">{lastStudent?.name}</p>
             </div>
           </div>
         )}
 
         {view === "enrollment-step" && (
-            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-10 animate-in fade-in zoom-in duration-700">
-                <Fingerprint className="h-44 w-44 text-emerald-500 animate-pulse drop-shadow-[0_0_20px_rgba(16,185,129,0.5)]" />
-                <div className="space-y-4">
-                    <h1 className="text-5xl font-black text-white italic uppercase tracking-tighter">{regData.name}</h1>
-                    <div className="text-3xl text-emerald-400 font-mono tracking-widest font-black bg-emerald-500/10 px-10 py-5 rounded-[2rem] border border-emerald-500/20 shadow-2xl">
-                        {systemStatus?.enrollment_status || "Initializing..."}
+            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-24 animate-in fade-in zoom-in duration-700">
+                <div className="relative p-24 bg-emerald-500/10 rounded-full border-[20px] border-emerald-500/20 shadow-2xl">
+                    <Fingerprint className="h-[350px] w-[350px] text-emerald-500 animate-pulse" />
+                </div>
+                <div className="space-y-16">
+                    <h1 className="text-[10rem] font-black text-white italic uppercase tracking-tighter leading-none">{regData.name}</h1>
+                    <div className="text-8xl text-emerald-400 font-mono tracking-[0.3em] font-black bg-emerald-500/10 px-32 py-16 rounded-[5rem] border-4 border-emerald-500/30 shadow-2xl">
+                        {systemStatus?.enrollment_status || "WAITING FOR SCAN..."}
                     </div>
                 </div>
             </div>
@@ -467,21 +415,25 @@ export default function KioskPage() {
 
         {view === "processing" && (
             <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="h-16 w-16 text-primary animate-spin" />
+                <Loader2 className="h-64 w-64 text-primary animate-spin" />
             </div>
         )}
       </div>
 
       <style jsx global>{`
-        @keyframes scan-line {
-            0% { top: 0; }
-            50% { top: 100%; }
-            100% { top: 0; }
-        }
-        .animate-scan-line { animation: scan-line 3s linear infinite; }
-        .text-glow-white { text-shadow: 0 0 30px rgba(255,255,255,0.3); }
-        .text-glow-emerald { text-shadow: 0 0 40px rgba(16,185,129,0.5); }
+        @keyframes scan-line { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
+        .animate-scan-line { animation: scan-line 4s linear infinite; }
+        .text-glow-white { text-shadow: 0 0 60px rgba(255,255,255,0.4); }
+        .text-glow-emerald { text-shadow: 0 0 100px rgba(16,185,129,0.6); }
       `}</style>
     </div>
+  );
+}
+
+export default function KioskPage() {
+  return (
+    <Suspense fallback={<BootingScreen />}>
+      <KioskContent />
+    </Suspense>
   );
 }

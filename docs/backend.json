@@ -1,63 +1,197 @@
-
 {
   "entities": {
-    "Student": {
-      "title": "Student",
-      "description": "Student roster entry with local fingerprint reference.",
+    "AppUser": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "AppUser",
       "type": "object",
+      "description": "Represents an authenticated user of the application (e.g., a teacher or administrator). Authentication details are managed by an external system (Firebase Authentication), so no sensitive credentials are stored here.",
       "properties": {
-        "name": { "type": "string" },
-        "rollNo": { "type": "number" },
-        "className": { "type": "string" },
-        "phone": { "type": "string" },
-        "fingerprintID": { "type": "string", "description": "Local ID or 'ENROLLED_ON_PI'" },
-        "attendance": { "type": "object", "description": "Date-indexed attendance status" },
-        "userId": { "type": "string", "description": "Admin user ID for data ownership" }
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the AppUser entity. This typically corresponds to the Firebase Authentication User ID (UID)."
+        },
+        "email": {
+          "type": "string",
+          "description": "The user's email address.",
+          "format": "email"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "The user's preferred display name."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when this AppUser record was first created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when this AppUser record was last updated.",
+          "format": "date-time"
+        }
       },
-      "required": ["name", "rollNo", "className", "userId"]
+      "required": [
+        "id",
+        "email",
+        "displayName",
+        "createdAt",
+        "updatedAt"
+      ]
     },
-    "KioskCommand": {
-      "title": "Kiosk Command",
-      "description": "Remote commands sent to the Pi (ENROLL, REBOOT, etc.)",
+    "Student": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Student",
       "type": "object",
+      "description": "Represents a student whose attendance is managed by the application.",
       "properties": {
-        "type": { "type": "string", "enum": ["ENROLL", "START_SCAN", "REBOOT", "SHUTDOWN", "RESET_PAIRING"] },
-        "status": { "type": "string", "enum": ["pending", "completed", "failed"] },
-        "userId": { "type": "string" },
-        "deviceId": { "type": "string", "description": "Pi Serial Number" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      }
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Student entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The full name of the student."
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "The student's contact phone number, used for SMS notifications."
+        },
+        "fingerprintID": {
+          "type": "string",
+          "description": "A unique identifier associated with the student's fingerprint, used for attendance scanning."
+        },
+        "appUserId": {
+          "type": "string",
+          "description": "Reference to the AppUser who manages this student. (Relationship: AppUser 1:N Student)"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the student record was first created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the student record was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "phoneNumber",
+        "fingerprintID",
+        "appUserId",
+        "createdAt",
+        "updatedAt"
+      ]
     },
-    "SystemStatus": {
-      "title": "System Status",
-      "description": "Heartbeat and health data from the Pi.",
+    "AttendanceRecord": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "AttendanceRecord",
       "type": "object",
+      "description": "Represents a single attendance entry for a student on a specific date.",
       "properties": {
-        "cpu_temp": { "type": "number" },
-        "last_online": { "type": "string", "format": "date-time" },
-        "status": { "type": "string" },
-        "hardware_ready": { "type": "boolean" },
-        "templates_stored": { "type": "number" },
-        "userId": { "type": "string", "description": "The linked owner UID" },
-        "pairing_token": { "type": "string", "description": "6-digit token for first-time linking" }
-      }
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the AttendanceRecord entity."
+        },
+        "studentId": {
+          "type": "string",
+          "description": "Reference to the Student whose attendance is being recorded. (Relationship: Student 1:N AttendanceRecord)"
+        },
+        "attendanceDate": {
+          "type": "string",
+          "description": "The specific date for which the attendance is recorded.",
+          "format": "date"
+        },
+        "status": {
+          "type": "string",
+          "description": "The attendance status for the student on the given date (e.g., 'present', 'absent')."
+        },
+        "recordedAt": {
+          "type": "string",
+          "description": "Timestamp when this attendance record was created or last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "studentId",
+        "attendanceDate",
+        "status",
+        "recordedAt"
+      ]
     }
   },
   "auth": {
-    "providers": ["password", "google"]
+    "providers": [
+      "password",
+      "anonymous"
+    ]
   },
   "firestore": {
-    "/students/{studentId}": {
-      "schema": { "$ref": "#/backend/entities/Student" },
-      "description": "Main student roster."
-    },
-    "/kiosk_commands/{commandId}": {
-      "schema": { "$ref": "#/backend/entities/KioskCommand" },
-      "description": "Queue for remote device actions."
-    },
-    "/system_status/{deviceId}": {
-      "schema": { "$ref": "#/backend/entities/SystemStatus" },
-      "description": "Real-time device health and pairing info. Key is Pi Serial Number."
-    }
+    "structure": [
+      {
+        "path": "/appUsers/{appUserId}",
+        "definition": {
+          "entityName": "AppUser",
+          "schema": {
+            "$ref": "#/backend/entities/AppUser"
+          },
+          "description": "Top-level collection for application users (teachers/administrators). The document ID (`appUserId`) must match the Firebase Authentication UID. Includes timestamps for creation and updates.",
+          "params": [
+            {
+              "name": "appUserId",
+              "description": "The unique identifier of the AppUser, corresponding to the Firebase Authentication UID."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/appUsers/{appUserId}/students/{studentId}",
+        "definition": {
+          "entityName": "Student",
+          "schema": {
+            "$ref": "#/backend/entities/Student"
+          },
+          "description": "Subcollection containing student records managed by a specific AppUser. Each student document includes the denormalized 'appUserId' for authorization independence, ensuring secure owner-based access.",
+          "params": [
+            {
+              "name": "appUserId",
+              "description": "The unique identifier of the managing AppUser."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique identifier for the Student record."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/appUsers/{appUserId}/students/{studentId}/attendanceRecords/{attendanceRecordId}",
+        "definition": {
+          "entityName": "AttendanceRecord",
+          "schema": {
+            "$ref": "#/backend/entities/AttendanceRecord"
+          },
+          "description": "Subcollection storing individual attendance records for a specific student. Each document must include a denormalized 'appUserId' (from the managing AppUser) and 'studentId' (from the parent Student) to ensure authorization independence and allow for robust, efficient security rules without 'get()' calls.",
+          "params": [
+            {
+              "name": "appUserId",
+              "description": "The unique identifier of the managing AppUser, denormalized for authorization independence."
+            },
+            {
+              "name": "studentId",
+              "description": "The unique identifier of the student for whom attendance is recorded."
+            },
+            {
+              "name": "attendanceRecordId",
+              "description": "The unique identifier for the specific attendance record."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The recommended Firestore structure prioritizes robust security rules, scalability, and debuggability by strictly adhering to the core design principles. The primary strategy employed is **Authorization Independence via Denormalization** and **Structural Segregation**.\n\n**1. Authorization Independence:**\n*   **AppUser:** Each `AppUser` (teacher/administrator) will have their own top-level document at `/appUsers/{appUserId}`. The `appUserId` parameter in the path will directly correspond to the Firebase Authentication UID, which also serves as the document's ID and the `id` field within the document. This makes authorization for `AppUser` documents straightforward: `request.auth.uid == appUserId`.\n*   **Student:** `Student` documents are nested under the `AppUser` who manages them: `/appUsers/{appUserId}/students/{studentId}`. Crucially, each `Student` document will contain a denormalized `appUserId` field (already present in the schema). This ensures that ownership is explicit within the document itself. This allows security rules to evaluate `resource.data.appUserId == request.auth.uid` directly on the `Student` document, without needing to perform a `get()` operation on the parent `AppUser` document. This is vital for atomic operations and simplifies rule logic.\n*   **AttendanceRecord:** `AttendanceRecord` documents are nested even further: `/appUsers/{appUserId}/students/{studentId}/attendanceRecords/{attendanceRecordId}`. To achieve complete authorization independence for `AttendanceRecord` documents, each document MUST include a denormalized `appUserId` field (referencing the managing `AppUser`) in addition to the `studentId` field (already present in the schema). This allows security rules for `AttendanceRecord` to verify `resource.data.appUserId == request.auth.uid` without needing to fetch the parent `Student` or `AppUser` document. This eliminates `get()` calls in rules, making them atomic, more performant, and easier to debug.\n\n**2. Query-Aware Security Rules (QAPs) and Structural Segregation:**\n*   The hierarchical structure (`/appUsers/{appUserId}/students/{studentId}/attendanceRecords/{attendanceRecordId}`) inherently supports QAPs by enforcing user-specific data isolation. A teacher (identified by `request.auth.uid`) can only list students or attendance records that reside under their own `/appUsers/{request.auth.uid}` path.\n*   The denormalized `appUserId` in both `Student` and `AttendanceRecord` documents is critical for secure `list` operations. Security rules can enforce that any `list` query on `/appUsers/{appUserId}/students` or `/appUsers/{appUserId}/students/{studentId}/attendanceRecords` must include `where('appUserId', '==', request.auth.uid)`. This prevents unauthorized access or accidental exposure of data by ensuring users only retrieve data belonging to them, without the rules acting as filters (which is insecure).\n*   **Deviation from User Request (Attendance Map):** The user requested an `attendance` map within the `Student` document. This approach is strongly discouraged and has been replaced by the `AttendanceRecord` subcollection. \n    *   **Reasoning:** An `attendance` map with dynamic date keys within a `Student` document would violate **Structural Segregation** (mixing student metadata with a potentially large and frequently updated list of attendance data), hinder **Authorization Independence** (difficult to apply granular rules to individual entries without `get()` calls or complex rule logic), and severely impact **Scalability and Querying** (document size limits, inefficient queries for specific dates or statuses, and problematic `list` operations). The dedicated `AttendanceRecord` subcollection, with each record as its own document, is a superior design for all these reasons, aligning with the "
   }
 }
