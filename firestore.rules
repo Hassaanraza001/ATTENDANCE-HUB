@@ -1,3 +1,4 @@
+
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -9,7 +10,7 @@ service cloud.firestore {
 
     // --- System Status (For Raspberry Pi Heartbeat & Pairing) ---
     match /system_status/{deviceId} {
-      // Allow the device (anonymous) to update its status
+      // Allow the device (anonymous) to update its status and enrollment progress
       allow read, write: if true; 
     }
 
@@ -21,10 +22,8 @@ service cloud.firestore {
 
     // --- Students (Unified Collection) ---
     match /students/{studentId} {
-      // Allow read/write if the student belongs to the logged-in user
-      // Or allow public read for the Kiosk UI (anonymous)
-      allow read: if true;
-      allow create, update, delete: if true; 
+      // Unified top-level access for MVP simplicity and cross-device sync
+      allow read, write: if true;
     }
 
     // --- App Users (Profiles) ---
