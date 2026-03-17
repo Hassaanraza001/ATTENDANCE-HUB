@@ -1,4 +1,3 @@
-
 import { getDb } from "@/lib/firebase";
 import type { Student, Faculty, UserProfile } from "@/lib/types";
 import { 
@@ -43,23 +42,6 @@ export async function updateUserProfile(userId: string, data: Partial<Omit<UserP
     ...sanitizeData(data), 
     updatedAt: serverTimestamp() 
   }, { merge: true });
-}
-
-export async function getOrCreatePairingCode(userId: string): Promise<string> {
-    const db = getDb();
-    const q = query(collection(db, "pairing_codes"), where("userId", "==", userId), limit(1));
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) return snapshot.docs[0].id;
-
-    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-    await setDoc(doc(db, "pairing_codes", newCode), { userId, createdAt: serverTimestamp() });
-    return newCode;
-}
-
-export async function getUserIdFromCode(code: string): Promise<string | null> {
-    const db = getDb();
-    const docSnap = await getDoc(doc(db, "pairing_codes", code));
-    return docSnap.exists() ? docSnap.data().userId : null;
 }
 
 export async function getStudents(userId: string): Promise<Student[]> {
