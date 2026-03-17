@@ -18,7 +18,8 @@ import {
   ChevronLeft,
   ShieldCheck,
   Zap,
-  Link as LinkIcon
+  Link as LinkIcon,
+  AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -57,7 +58,7 @@ const BootingScreen = () => {
   useEffect(() => {
     const interval = setInterval(() => {
       setProgress((prev) => (prev >= 100 ? 100 : prev + 1));
-    }, 25);
+    }, 20);
     return () => clearInterval(interval);
   }, []);
   return (
@@ -65,15 +66,15 @@ const BootingScreen = () => {
       <div className="relative mb-8">
         <div className="absolute inset-0 bg-primary/30 blur-[100px] rounded-full animate-pulse" />
         <div className="relative p-12 bg-slate-900/50 rounded-full border border-primary/20 shadow-2xl">
-            <CalendarCheck className="h-24 w-24 text-primary animate-bounce" />
+            <CalendarCheck className="h-32 w-32 text-primary animate-bounce" />
         </div>
       </div>
-      <h1 className="text-6xl font-black text-white italic tracking-tighter uppercase mb-2 text-glow-white">
+      <h1 className="text-7xl font-black text-white italic tracking-tighter uppercase mb-4 text-glow-white">
         BioSync <span className="text-primary">Box</span>
       </h1>
-      <p className="text-primary/60 font-mono text-xs tracking-[0.8em] uppercase font-bold mb-8">OS KERNEL v2.8.5.PRO</p>
-      <div className="w-80 space-y-4">
-        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
+      <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold mb-12">OS KERNEL v2.8.5.PRO</p>
+      <div className="w-96 space-y-4">
+        <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
           <div className="h-full bg-primary shadow-[0_0_20px_rgba(59,130,246,1)] transition-all duration-200 rounded-full" style={{ width: `${progress}%` }} />
         </div>
       </div>
@@ -101,7 +102,7 @@ function KioskContent() {
 
   useEffect(() => {
     const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
-    const bootTimer = setTimeout(() => setIsBooting(false), 3500);
+    const bootTimer = setTimeout(() => setIsBooting(false), 3000);
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
   }, []);
 
@@ -121,12 +122,17 @@ function KioskContent() {
         const data = snap.data();
         setSystemStatus(data);
         setCurrentUserId(data.userId);
+        
         if (data.userId) {
-          setView(v => (v === "pairing" || v === "processing" ? "home" : v));
+          if (view === "pairing" || view === "processing") setView("home");
           const qCount = query(collection(db, "students"), where("userId", "==", data.userId));
           const countSnap = await getCountFromServer(qCount);
           setStudentCount(countSnap.data().count);
         } else setView("pairing");
+
+        if (data.enrollment_status === "SUCCESS") {
+            setTimeout(() => setView("home"), 2000);
+        }
       } else if (serial) {
         setDoc(statusRef, { 
             deviceId: serial, 
@@ -138,7 +144,7 @@ function KioskContent() {
         });
       }
     });
-  }, [urlDeviceId]);
+  }, [urlDeviceId, view]);
 
   useEffect(() => {
     if (view === "attendance" && currentUserId) {
@@ -200,29 +206,40 @@ function KioskContent() {
     } catch (e) { toast({ variant: "destructive", title: "DB Error" }); }
   };
 
+  const getEnrollmentMessage = () => {
+    switch(systemStatus?.enrollment_status) {
+        case "PLACE_FINGER": return "PLACE FINGER ON SENSOR";
+        case "REMOVE_FINGER": return "REMOVE YOUR FINGER";
+        case "PLACE_AGAIN": return "PLACE SAME FINGER AGAIN";
+        case "SUCCESS": return "ENROLLMENT SUCCESSFUL!";
+        case "ERROR_IMAGE": return "SCAN ERROR! TRY AGAIN";
+        case "MATCH_ERROR": return "FINGERS DO NOT MATCH";
+        case "HARDWARE_ERROR": return "SENSOR BUSY! RESTARTING...";
+        default: return "WAITING FOR SCAN...";
+    }
+  };
+
   if (isBooting) return <BootingScreen />;
 
   return (
     <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950")}>
       
-      {/* MEGA HEADER: Scaled for hardware screen */}
-      <div className="h-32 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
-        <div className="flex items-center gap-10">
-            <div className="p-4 bg-primary/10 rounded-[2rem] border border-primary/20">
-                <CalendarCheck className="h-16 w-16 text-primary" />
-            </div>
-            <span className="font-black text-6xl tracking-tighter text-white uppercase italic">
+      {/* MEGA HEADER */}
+      <div className="h-28 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
+        <div className="flex items-center gap-8">
+            <CalendarCheck className="h-14 w-14 text-primary" />
+            <span className="font-black text-5xl tracking-tighter text-white uppercase italic">
                 BioSync <span className="text-primary">Box</span>
             </span>
         </div>
-        <div className="flex items-center gap-16">
-           <div className="flex items-center gap-8 bg-black/40 px-10 py-5 rounded-[2.5rem] border border-white/5">
-              <div className={cn("h-6 w-6 rounded-full", systemStatus?.status === 'online' ? "bg-emerald-500 animate-pulse shadow-[0_0_20px_rgba(16,185,129,1)]" : "bg-rose-500")} />
-              <span className="text-3xl font-black text-white uppercase tracking-[0.2em]">
+        <div className="flex items-center gap-12">
+           <div className="flex items-center gap-4 bg-black/40 px-8 py-3 rounded-3xl border border-white/5">
+              <div className={cn("h-4 w-4 rounded-full", systemStatus?.status === 'online' ? "bg-emerald-500 animate-pulse" : "bg-rose-500")} />
+              <span className="text-xl font-black text-white uppercase tracking-widest">
                 {systemStatus?.status || "OFFLINE"}
               </span>
            </div>
-           <div className="font-mono text-6xl font-bold text-white tracking-widest bg-primary/10 px-12 py-5 rounded-[2.5rem] border border-primary/20 shadow-2xl">
+           <div className="font-mono text-4xl font-bold text-white tracking-widest bg-primary/10 px-8 py-3 rounded-3xl border border-primary/20">
              {format(currentTime, "HH:mm")}
            </div>
         </div>
@@ -233,30 +250,30 @@ function KioskContent() {
         {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success") && (
           <button 
             onClick={handleBack}
-            className="absolute top-10 left-12 z-[160] h-24 px-12 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[3rem] flex items-center gap-8 text-white transition-all active:scale-95 shadow-2xl"
+            className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl"
           >
-            <ChevronLeft className="h-14 w-14" />
-            <span className="text-2xl font-black uppercase tracking-[0.3em]">BACK</span>
+            <ChevronLeft className="h-10 w-10" />
+            <span className="text-xl font-black uppercase tracking-widest">BACK</span>
           </button>
         )}
 
         {view === "pairing" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20 p-12">
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-12 p-8">
             <div className="relative">
-                <div className="absolute inset-0 bg-primary/20 blur-[150px] rounded-full animate-pulse" />
-                <div className="relative p-20 bg-slate-900/50 rounded-[6rem] border border-primary/20 shadow-2xl">
-                    <LinkIcon className="h-40 w-40 text-primary animate-pulse" />
+                <div className="absolute inset-0 bg-primary/20 blur-[100px] rounded-full animate-pulse" />
+                <div className="relative p-12 bg-slate-900/50 rounded-[4rem] border border-primary/20 shadow-2xl">
+                    <LinkIcon className="h-24 w-24 text-primary animate-pulse" />
                 </div>
             </div>
-            <div className="space-y-10">
-                <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter">Pair Device</h2>
-                <p className="text-slate-400 text-4xl font-medium max-w-4xl leading-relaxed">
+            <div className="space-y-6">
+                <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Pair Device</h2>
+                <p className="text-slate-400 text-2xl font-medium max-w-2xl leading-relaxed">
                   Enter token in Dashboard <span className="text-primary italic font-bold">Device Center</span>
                 </p>
             </div>
             
-            <div className="bg-primary/10 border-2 border-primary/30 px-32 py-20 rounded-[6rem] shadow-[0_0_150px_rgba(59,130,246,0.3)]">
-                <span className="text-[12rem] font-black text-white tracking-[0.2em] font-mono leading-none block text-glow-white">
+            <div className="bg-primary/10 border-2 border-primary/30 px-24 py-12 rounded-[4rem] shadow-2xl">
+                <span className="text-[7rem] font-black text-white tracking-[0.1em] font-mono leading-none block text-glow-white">
                     {systemStatus?.pairing_token || "------"}
                 </span>
             </div>
@@ -264,57 +281,57 @@ function KioskContent() {
         )}
 
         {view === "home" && (
-          <div className="w-full h-full flex flex-col items-center justify-between py-24 px-12 animate-in fade-in duration-1000">
+          <div className="w-full h-full flex flex-col items-center justify-between py-16 px-10 animate-in fade-in duration-700">
             <div className="text-center">
-                <div className="text-[240px] font-black text-white tracking-tighter italic leading-none text-glow-white">
+                <div className="text-[12rem] font-black text-white tracking-tighter italic leading-none text-glow-white">
                     {format(currentTime, "HH:mm")}
                 </div>
-                <div className="text-6xl font-bold text-primary uppercase tracking-[0.6em] mt-16">
+                <div className="text-4xl font-bold text-primary uppercase tracking-[0.4em] mt-8">
                     {format(currentTime, "EEEE, MMM do")}
                 </div>
             </div>
 
-            <div className="flex gap-20 w-full max-w-[1600px]">
+            <div className="flex gap-12 w-full max-w-[1400px]">
                 <button 
                     onClick={() => setView("attendance")} 
-                    className="group relative flex-1 h-[450px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[6rem] flex flex-col items-center justify-center gap-16 transition-all active:scale-95 shadow-2xl"
+                    className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl"
                 >
-                    <div className="p-12 bg-primary/10 rounded-full border border-primary/20 group-hover:scale-110 transition-transform">
-                        <Fingerprint className="h-48 w-40 text-primary drop-shadow-[0_0_50px_rgba(59,130,246,0.8)]" />
+                    <div className="p-8 bg-primary/10 rounded-full border border-primary/20">
+                        <Fingerprint className="h-32 w-28 text-primary drop-shadow-[0_0_30px_rgba(59,130,246,0.8)]" />
                     </div>
-                    <span className="text-8xl font-black text-white uppercase italic tracking-tighter">Attendance</span>
+                    <span className="text-6xl font-black text-white uppercase italic tracking-tighter">Attendance</span>
                 </button>
                 <button 
                     onClick={() => { setRegData({name: "", rollNo: "", class: "", phone: ""}); setView("registration"); }} 
-                    className="group relative flex-1 h-[450px] bg-slate-900/60 border-4 border-white/10 hover:border-emerald-500/50 rounded-[6rem] flex flex-col items-center justify-center gap-16 transition-all active:scale-95 shadow-2xl"
+                    className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-emerald-500/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl"
                 >
-                    <div className="p-12 bg-emerald-500/10 rounded-full border border-emerald-500/20 group-hover:scale-110 transition-transform">
-                        <UserPlus className="h-48 w-40 text-emerald-500 drop-shadow-[0_0_50px_rgba(16,185,129,0.8)]" />
+                    <div className="p-8 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+                        <UserPlus className="h-32 w-28 text-emerald-500 drop-shadow-[0_0_30px_rgba(16,185,129,0.8)]" />
                     </div>
-                    <span className="text-8xl font-black text-white uppercase italic tracking-tighter">Register</span>
+                    <span className="text-6xl font-black text-white uppercase italic tracking-tighter">Register</span>
                 </button>
             </div>
 
-            <div className="w-full max-w-[1600px] bg-slate-900/40 border-2 border-white/10 rounded-[5rem] p-16 grid grid-cols-3 gap-20 backdrop-blur-md">
-                <div className="flex items-center gap-10 border-r border-white/10">
-                    <Users className="h-24 w-24 text-primary" />
+            <div className="w-full max-w-[1400px] bg-slate-900/40 border-2 border-white/10 rounded-[3rem] p-10 grid grid-cols-3 gap-12 backdrop-blur-md">
+                <div className="flex items-center gap-6 border-r border-white/10">
+                    <Users className="h-12 w-12 text-primary" />
                     <div className="flex flex-col">
-                        <span className="text-2xl font-black text-white/30 uppercase tracking-widest">STUDENTS</span>
-                        <span className="text-5xl font-bold text-white">{studentCount} IDs</span>
+                        <span className="text-lg font-black text-white/30 uppercase">STUDENTS</span>
+                        <span className="text-3xl font-bold text-white">{studentCount}</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-10 border-r border-white/10">
-                    <Database className="h-24 w-24 text-orange-500" />
+                <div className="flex items-center gap-6 border-r border-white/10">
+                    <Database className="h-12 w-12 text-orange-500" />
                     <div className="flex flex-col">
-                        <span className="text-2xl font-black text-white/30 uppercase tracking-widest">STORAGE</span>
-                        <span className="text-5xl font-bold text-white">{systemStatus?.templates_stored || 0} DAT</span>
+                        <span className="text-lg font-black text-white/30 uppercase">STORAGE</span>
+                        <span className="text-3xl font-bold text-white">{systemStatus?.templates_stored || 0}</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-10">
-                    <Zap className="h-24 w-24 text-indigo-400 animate-pulse" />
+                <div className="flex items-center gap-6">
+                    <Activity className="h-12 w-12 text-indigo-400" />
                     <div className="flex flex-col">
-                        <span className="text-2xl font-black text-white/30 uppercase tracking-widest">KERNEL</span>
-                        <span className="text-5xl font-bold text-indigo-400 uppercase italic">ACTIVE</span>
+                        <span className="text-lg font-black text-white/30 uppercase">KERNEL</span>
+                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">v2.8.5 PRO</span>
                     </div>
                 </div>
             </div>
@@ -322,42 +339,42 @@ function KioskContent() {
         )}
 
         {view === "registration" && (
-            <div className={cn("w-full h-full flex flex-col transition-all duration-500", activeInput && "-translate-y-64")}>
-                <div className="flex-1 flex flex-col items-center justify-center p-12">
-                    <div className="w-full max-w-[1400px] bg-slate-900/80 backdrop-blur-3xl p-24 rounded-[6rem] border-2 border-white/10 shadow-2xl">
-                        <h2 className="text-8xl font-black italic uppercase text-primary mb-24 tracking-widest text-center border-b-2 border-white/5 pb-16">Enroll Student</h2>
-                        <div className="grid grid-cols-2 gap-16">
-                            <div onClick={() => setActiveInput("name")} className={cn("col-span-2 px-20 py-12 rounded-[4rem] border-4 transition-all cursor-pointer", activeInput === "name" ? "border-primary bg-primary/10 shadow-[0_0_50px_rgba(59,130,246,0.2)]" : "border-white/5 bg-white/5")}>
-                                <label className="text-2xl font-black uppercase text-white/40 block tracking-widest mb-6">FULL NAME</label>
-                                <div className="text-7xl font-bold truncate h-24 flex items-center">{regData.name || "---"}</div>
+            <div className={cn("w-full h-full flex flex-col transition-all duration-500", activeInput && "-translate-y-48")}>
+                <div className="flex-1 flex flex-col items-center justify-center p-8">
+                    <div className="w-full max-w-[1200px] bg-slate-900/80 backdrop-blur-3xl p-16 rounded-[4rem] border-2 border-white/10 shadow-2xl">
+                        <h2 className="text-6xl font-black italic uppercase text-primary mb-12 tracking-widest text-center border-b-2 border-white/5 pb-8">Enroll Student</h2>
+                        <div className="grid grid-cols-2 gap-8">
+                            <div onClick={() => setActiveInput("name")} className={cn("col-span-2 px-12 py-8 rounded-3xl border-4 transition-all cursor-pointer", activeInput === "name" ? "border-primary bg-primary/10" : "border-white/5 bg-white/5")}>
+                                <label className="text-lg font-black uppercase text-white/40 block tracking-widest mb-4">FULL NAME</label>
+                                <div className="text-5xl font-bold truncate h-16 flex items-center">{regData.name || "---"}</div>
                             </div>
-                            <div onClick={() => setActiveInput("rollNo")} className={cn("px-20 py-12 rounded-[4rem] border-4 transition-all cursor-pointer", activeInput === "rollNo" ? "border-primary bg-primary/10 shadow-[0_0_50px_rgba(59,130,246,0.2)]" : "border-white/5 bg-white/5")}>
-                                <label className="text-2xl font-black uppercase text-white/40 block tracking-widest mb-6">ROLL NO</label>
-                                <div className="text-7xl font-bold h-24 flex items-center">{regData.rollNo || "00"}</div>
+                            <div onClick={() => setActiveInput("rollNo")} className={cn("px-12 py-8 rounded-3xl border-4 transition-all cursor-pointer", activeInput === "rollNo" ? "border-primary bg-primary/10" : "border-white/5 bg-white/5")}>
+                                <label className="text-lg font-black uppercase text-white/40 block tracking-widest mb-4">ROLL NO</label>
+                                <div className="text-5xl font-bold h-16 flex items-center">{regData.rollNo || "00"}</div>
                             </div>
-                            <div onClick={() => setActiveInput("class")} className={cn("px-20 py-12 rounded-[4rem] border-4 transition-all cursor-pointer", activeInput === "class" ? "border-primary bg-primary/10 shadow-[0_0_50px_rgba(59,130,246,0.2)]" : "border-white/5 bg-white/5")}>
-                                <label className="text-2xl font-black uppercase text-white/40 block tracking-widest mb-6">CLASS</label>
-                                <div className="text-7xl font-bold h-24 flex items-center">{regData.class || "10A"}</div>
+                            <div onClick={() => setActiveInput("class")} className={cn("px-12 py-8 rounded-3xl border-4 transition-all cursor-pointer", activeInput === "class" ? "border-primary bg-primary/10" : "border-white/5 bg-white/5")}>
+                                <label className="text-lg font-black uppercase text-white/40 block tracking-widest mb-4">CLASS</label>
+                                <div className="text-5xl font-bold h-16 flex items-center">{regData.class || "10A"}</div>
                             </div>
                         </div>
                         {!activeInput && (
-                            <Button onClick={handleRegistration} className="w-full h-40 mt-24 text-7xl font-black bg-emerald-600 hover:bg-emerald-500 rounded-[4.5rem] uppercase italic tracking-tighter shadow-2xl transition-all active:scale-95">
+                            <Button onClick={handleRegistration} className="w-full h-28 mt-12 text-5xl font-black bg-emerald-600 hover:bg-emerald-500 rounded-3xl uppercase italic tracking-tighter shadow-2xl">
                                 Start Biometric Scan
                             </Button>
                         )}
                     </div>
                 </div>
 
-                <div className={cn("fixed bottom-0 left-0 right-0 bg-slate-950/98 backdrop-blur-3xl border-t-2 border-white/10 p-16 transition-all duration-500 z-[150]", activeInput ? "translate-y-0" : "translate-y-full")}>
-                    <div className="flex justify-between items-center mb-12">
-                        <span className="text-4xl font-black text-primary uppercase tracking-[0.5em]">INPUT: <span className="text-white">{activeInput?.toUpperCase()}</span></span>
-                        <button onClick={() => setActiveInput(null)} className="h-20 px-16 bg-emerald-600 rounded-full font-black text-3xl uppercase text-white shadow-2xl">CONFIRM</button>
+                <div className={cn("fixed bottom-0 left-0 right-0 bg-slate-950/98 backdrop-blur-3xl border-t-2 border-white/10 p-10 transition-all duration-500 z-[150]", activeInput ? "translate-y-0" : "translate-y-full")}>
+                    <div className="flex justify-between items-center mb-8">
+                        <span className="text-2xl font-black text-primary uppercase">INPUT: <span className="text-white">{activeInput?.toUpperCase()}</span></span>
+                        <button onClick={() => setActiveInput(null)} className="h-14 px-10 bg-emerald-600 rounded-full font-black text-xl uppercase text-white">CONFIRM</button>
                     </div>
-                    <div className="flex flex-col gap-8 max-w-[1600px] mx-auto">
+                    <div className="flex flex-col gap-4 max-w-[1400px] mx-auto">
                         {(activeInput === 'rollNo' ? NUMPAD_LAYOUT : KEYBOARD_LAYOUT).map((row, i) => (
-                        <div key={i} className="flex justify-center gap-8">
+                        <div key={i} className="flex justify-center gap-4">
                             {row.map(key => (
-                            <button key={key} onClick={() => onKeyPress(key)} className={cn("h-28 flex-1 min-w-[8rem] rounded-[2.5rem] text-5xl font-black transition-all active:scale-90", key === "Backspace" ? "bg-rose-500 text-white" : key === "CapsLock" ? cn("bg-indigo-500/20 text-indigo-400", isCaps && "bg-indigo-500 text-white") : "bg-white/10 text-white hover:bg-white/20 border border-white/5 shadow-xl")}>
+                            <button key={key} onClick={() => onKeyPress(key)} className={cn("h-20 flex-1 min-w-[6rem] rounded-2xl text-3xl font-black transition-all active:scale-90", key === "Backspace" ? "bg-rose-500 text-white" : key === "CapsLock" ? cn("bg-indigo-500/20 text-indigo-400", isCaps && "bg-indigo-500 text-white") : "bg-white/10 text-white border border-white/5 shadow-xl")}>
                                 {key === "Backspace" ? "DEL" : key === "CapsLock" ? "ABC" : key === "Space" ? "SPACE" : isCaps ? key.toUpperCase() : key.toLowerCase()}
                             </button>
                             ))}
@@ -369,45 +386,52 @@ function KioskContent() {
         )}
 
         {view === "attendance" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-24 animate-in zoom-in duration-500">
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in zoom-in duration-500">
             <div className="relative">
-                <div className="absolute inset-0 bg-primary/30 blur-[200px] rounded-full animate-pulse" />
-                <div className="relative bg-primary/10 p-56 rounded-full border-[30px] border-primary/20 shadow-2xl">
-                    <Fingerprint className="h-[400px] w-[400px] text-primary animate-pulse" />
-                    <div className="absolute top-0 left-0 w-full h-[15px] bg-primary shadow-[0_0_100px_rgba(59,130,246,1)] animate-scan-line" />
+                <div className="absolute inset-0 bg-primary/30 blur-[150px] rounded-full animate-pulse" />
+                <div className="relative bg-primary/10 p-32 rounded-full border-[20px] border-primary/20 shadow-2xl">
+                    <Fingerprint className="h-64 w-64 text-primary animate-pulse" />
+                    <div className="absolute top-0 left-0 w-full h-2 bg-primary shadow-[0_0_50px_rgba(59,130,246,1)] animate-scan-line" />
                 </div>
             </div>
-            <div className="space-y-12">
-                <h1 className="text-[14rem] font-black text-white italic uppercase tracking-tighter leading-none">Scan Finger</h1>
-                <div className="flex items-center justify-center gap-12 bg-white/5 px-16 py-8 rounded-full border border-white/10">
-                    <ShieldCheck className="h-20 w-24 text-emerald-500" />
-                    <p className="text-primary font-mono text-4xl tracking-[0.8em] uppercase font-black animate-pulse">Bio-Identity Active</p>
+            <div className="space-y-8">
+                <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Scan Finger</h1>
+                <div className="flex items-center justify-center gap-6 bg-white/5 px-10 py-4 rounded-full border border-white/10">
+                    <ShieldCheck className="h-10 w-10 text-emerald-500" />
+                    <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Bio-Identity Active</p>
                 </div>
             </div>
           </div>
         )}
 
         {view === "success" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-24 animate-in zoom-in duration-700">
-            <div className="bg-emerald-500 p-40 rounded-full scale-110 shadow-[0_0_200px_rgba(16,185,129,0.6)] border-[30px] border-emerald-400/40">
-                <CheckCircle2 className="h-[350px] w-[350px] text-white" />
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in zoom-in duration-700">
+            <div className="bg-emerald-500 p-24 rounded-full scale-110 shadow-[0_0_150px_rgba(16,185,129,0.6)] border-[20px] border-emerald-400/40">
+                <CheckCircle2 className="h-48 w-48 text-white" />
             </div>
-            <div className="space-y-12">
-                <h2 className="text-[16rem] font-black text-white italic tracking-tighter leading-none uppercase text-glow-emerald">PRESENT</h2>
-                <p className="text-[9rem] text-emerald-300 font-black uppercase tracking-[0.3em]">{lastStudent?.name}</p>
+            <div className="space-y-8">
+                <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase text-glow-emerald">PRESENT</h2>
+                <p className="text-6xl text-emerald-300 font-black uppercase tracking-widest">{lastStudent?.name}</p>
             </div>
           </div>
         )}
 
         {view === "enrollment-step" && (
-            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-24 animate-in fade-in zoom-in duration-700">
-                <div className="relative p-24 bg-emerald-500/10 rounded-full border-[20px] border-emerald-500/20 shadow-2xl">
-                    <Fingerprint className="h-[350px] w-[350px] text-emerald-500 animate-pulse" />
+            <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in fade-in zoom-in duration-700">
+                <div className="relative p-16 bg-emerald-500/10 rounded-full border-[15px] border-emerald-500/20 shadow-2xl">
+                    {systemStatus?.enrollment_status?.includes("ERROR") ? (
+                        <AlertTriangle className="h-48 w-48 text-rose-500 animate-pulse" />
+                    ) : (
+                        <Fingerprint className="h-48 w-48 text-emerald-500 animate-pulse" />
+                    )}
                 </div>
-                <div className="space-y-16">
-                    <h1 className="text-[10rem] font-black text-white italic uppercase tracking-tighter leading-none">{regData.name}</h1>
-                    <div className="text-8xl text-emerald-400 font-mono tracking-[0.3em] font-black bg-emerald-500/10 px-32 py-16 rounded-[5rem] border-4 border-emerald-500/30 shadow-2xl">
-                        {systemStatus?.enrollment_status || "WAITING FOR SCAN..."}
+                <div className="space-y-10">
+                    <h1 className="text-7xl font-black text-white italic uppercase tracking-tighter leading-none">{regData.name}</h1>
+                    <div className={cn(
+                        "text-5xl font-mono tracking-[0.2em] font-black px-16 py-8 rounded-[3rem] border-4 shadow-2xl",
+                        systemStatus?.enrollment_status?.includes("ERROR") ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                    )}>
+                        {getEnrollmentMessage()}
                     </div>
                 </div>
             </div>
@@ -415,7 +439,7 @@ function KioskContent() {
 
         {view === "processing" && (
             <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="h-64 w-64 text-primary animate-spin" />
+                <Loader2 className="h-48 w-48 text-primary animate-spin" />
             </div>
         )}
       </div>
@@ -423,8 +447,8 @@ function KioskContent() {
       <style jsx global>{`
         @keyframes scan-line { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
         .animate-scan-line { animation: scan-line 4s linear infinite; }
-        .text-glow-white { text-shadow: 0 0 60px rgba(255,255,255,0.4); }
-        .text-glow-emerald { text-shadow: 0 0 100px rgba(16,185,129,0.6); }
+        .text-glow-white { text-shadow: 0 0 40px rgba(255,255,255,0.4); }
+        .text-glow-emerald { text-shadow: 0 0 60px rgba(16,185,129,0.6); }
       `}</style>
     </div>
   );

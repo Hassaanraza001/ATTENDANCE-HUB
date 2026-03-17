@@ -165,52 +165,66 @@ def update_system_health():
 # ENROLL
 # =============================================================
 
+def update_status(status_msg):
+    try:
+        db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
+            "enrollment_status": status_msg
+        })
+    except:
+        pass
+
 def enroll_new_finger(student_id):
 
     try:
-
+        update_status("PLACE_FINGER")
         print("Place finger")
-
-        while finger.get_image()!=adafruit_fingerprint.OK:
+        while finger.get_image() != adafruit_fingerprint.OK:
             time.sleep(0.1)
+        
+        time.sleep(0.5)
+        if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+            update_status("ERROR_IMAGE")
+            return False
 
-        finger.image_2_tz(1)
-
+        update_status("REMOVE_FINGER")
         print("Remove finger")
-
         time.sleep(2)
-
-        while finger.get_image()==adafruit_fingerprint.OK:
+        while finger.get_image() == adafruit_fingerprint.OK:
             time.sleep(0.1)
 
+        update_status("PLACE_AGAIN")
         print("Place again")
-
-        while finger.get_image()!=adafruit_fingerprint.OK:
+        while finger.get_image() != adafruit_fingerprint.OK:
             time.sleep(0.1)
+        
+        time.sleep(0.5)
+        if finger.image_2_tz(2) != adafruit_fingerprint.OK:
+            update_status("ERROR_IMAGE")
+            return False
 
-        finger.image_2_tz(2)
-
-        if finger.create_model()==adafruit_fingerprint.OK:
-
+        if finger.create_model() == adafruit_fingerprint.OK:
             template = finger.get_fpdata(1)
 
-            with open(os.path.join(TEMPLATES_DIR,f"{student_id}.dat"),"wb") as f:
-
+            with open(os.path.join(TEMPLATES_DIR, f"{student_id}.dat"), "wb") as f:
                 f.write(bytearray(template))
 
             db.collection(COLLECTION_STUDENTS).document(student_id).update({
-
-                "fingerprintID":"ENROLLED",
-                "last_enrolled":firestore.SERVER_TIMESTAMP
+                "fingerprintID": "ENROLLED",
+                "last_enrolled": firestore.SERVER_TIMESTAMP
             })
 
+            update_status("SUCCESS")
             print("Enroll success")
-
+            time.sleep(2)
+            update_status("IDLE")
             return True
+        else:
+            update_status("MATCH_ERROR")
+            return False
 
     except Exception as e:
-
-        print("Enroll error:",e)
+        print("Enroll error:", e)
+        update_status("HARDWARE_ERROR")
 
     return False
 
@@ -221,25 +235,23 @@ def enroll_new_finger(student_id):
 
 def verify_finger_locally():
 
-    if finger.get_image()!=adafruit_fingerprint.OK:
+    if finger.get_image() != adafruit_fingerprint.OK:
         return None
 
-    if finger.image_2_tz(1)!=adafruit_fingerprint.OK:
+    if finger.image_2_tz(1) != adafruit_fingerprint.OK:
         return None
 
     for filename in os.listdir(TEMPLATES_DIR):
 
         if filename.endswith(".dat"):
 
-            with open(os.path.join(TEMPLATES_DIR,filename),"rb") as f:
+            with open(os.path.join(TEMPLATES_DIR, filename), "rb") as f:
+                stored_template = list(f.read())
 
-                stored_template=list(f.read())
+            finger.send_fpdata(stored_template, 2)
 
-            finger.send_fpdata(stored_template,2)
-
-            if finger.compare_templates()>=50:
-
-                return filename.replace(".dat","")
+            if finger.compare_templates() >= 50:
+                return filename.replace(".dat", "")
 
     return None
 
@@ -251,7 +263,8 @@ def verify_finger_locally():
 def handle_biometric_loop():
 
     while True:
-
+        # Don't scan if we are in enrollment or other mode
+        # Simple check for any pending command
         matched_id = verify_finger_locally()
 
         if matched_id:
@@ -266,15 +279,15 @@ def handle_biometric_loop():
 
                 student_data = student_doc.to_dict()
 
-                attendance = student_data.get("attendance",{})
+                attendance = student_data.get("attendance", {})
 
-                if attendance.get(today)!="present":
+                if attendance.get(today) != "present":
 
-                    attendance[today]="present"
+                    attendance[today] = "present"
 
-                    student_ref.update({"attendance":attendance})
+                    student_ref.update({"attendance": attendance})
 
-                    print("Attendance:",student_data.get("name"))
+                    print("Attendance:", student_data.get("name"))
 
                     time.sleep(5)
 
@@ -287,35 +300,35 @@ def handle_biometric_loop():
 
 def listen_for_commands():
 
-    def on_snapshot(col_snapshot,changes,read_time):
+    def on_snapshot(col_snapshot, changes, read_time):
 
         for change in col_snapshot:
 
             data = change.to_dict()
 
-            if data.get("status")=="pending":
+            if data.get("status") == "pending":
 
-                cmd_type=data.get("type")
+                cmd_type = data.get("type")
 
-                if cmd_type=="ENROLL":
+                if cmd_type == "ENROLL":
 
-                    success=enroll_new_finger(data.get("studentId"))
+                    success = enroll_new_finger(data.get("studentId"))
 
-                    change.reference.update({"status":"completed" if success else "failed"})
+                    change.reference.update({"status": "completed" if success else "failed"})
 
-                elif cmd_type=="REBOOT":
+                elif cmd_type == "REBOOT":
 
-                    change.reference.update({"status":"completed"})
+                    change.reference.update({"status": "completed"})
                     os.system("sudo reboot")
 
-                elif cmd_type=="SHUTDOWN":
+                elif cmd_type == "SHUTDOWN":
 
-                    change.reference.update({"status":"completed"})
+                    change.reference.update({"status": "completed"})
                     os.system("sudo shutdown -h now")
 
     query = db.collection(COLLECTION_COMMANDS)\
-        .where("deviceId","==",DEVICE_SERIAL)\
-        .where("status","==","pending")
+        .where("deviceId", "==", DEVICE_SERIAL)\
+        .where("status", "==", "pending")
 
     query.on_snapshot(on_snapshot)
 
@@ -324,7 +337,7 @@ def listen_for_commands():
 # MAIN
 # =============================================================
 
-if __name__=="__main__":
+if __name__ == "__main__":
 
     DEVICE_SERIAL = get_serial()
 
@@ -332,13 +345,13 @@ if __name__=="__main__":
 
     setup_hardware()
 
-    threading.Thread(target=update_system_health,daemon=True).start()
+    threading.Thread(target=update_system_health, daemon=True).start()
 
-    threading.Thread(target=handle_biometric_loop,daemon=True).start()
+    threading.Thread(target=handle_biometric_loop, daemon=True).start()
 
     listen_for_commands()
 
-    print("DEVICE READY:",DEVICE_SERIAL)
+    print("DEVICE READY:", DEVICE_SERIAL)
 
     while True:
         time.sleep(1)
