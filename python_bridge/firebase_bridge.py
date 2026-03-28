@@ -94,6 +94,19 @@ def heartbeat():
             pass
         time.sleep(HEARTBEAT_INTERVAL)
 
+# ================= ROBUST IMAGE CAPTURE =================
+def safe_get_image():
+    """Retries capturing image multiple times for stability"""
+    for _ in range(20):
+        try:
+            uart_port.reset_input_buffer()
+            if finger.get_image() == adafruit_fingerprint.OK:
+                return True
+        except:
+            pass
+        time.sleep(0.2)
+    return False
+
 # ================= ENROLL LOGIC =================
 def get_free_location():
     for i in range(1, 128):
@@ -105,15 +118,21 @@ def enroll(student_id):
     global is_enrolling, attendance_mode
     with sensor_lock:
         is_enrolling = True
-        attendance_mode = False # Stop attendance during enrollment
+        attendance_mode = False 
         print(f"--- Starting Enrollment for: {student_id} ---")
+        
+        # Reset sensor memory for fresh enrollment if needed (Optional)
+        # finger.empty_library() 
+        
         update_status("PLACE_FINGER")
 
         try:
             # Capture 1
-            while finger.get_image() != adafruit_fingerprint.OK:
-                if not is_enrolling: return
-                time.sleep(0.1)
+            if not safe_get_image():
+                update_status("ERROR_IMAGE")
+                is_enrolling = False
+                return
+            
             finger.image_2_tz(1)
 
             update_status("REMOVE_FINGER")
@@ -122,8 +141,11 @@ def enroll(student_id):
                 time.sleep(0.1)
 
             update_status("PLACE_AGAIN")
-            while finger.get_image() != adafruit_fingerprint.OK:
-                time.sleep(0.1)
+            if not safe_get_image():
+                update_status("ERROR_IMAGE")
+                is_enrolling = False
+                return
+                
             finger.image_2_tz(2)
 
             if finger.create_model() == adafruit_fingerprint.OK:
@@ -161,17 +183,18 @@ def do_attendance():
 
         with sensor_lock:
             try:
-                # Flush buffer before scan
-                uart_port.reset_input_buffer()
-                
+                # Use robust scanning
                 if finger.get_image() == adafruit_fingerprint.OK:
                     print("Finger detected! Matching...")
+                    
                     if finger.image_2_tz(1) == adafruit_fingerprint.OK:
+                        uart_port.reset_input_buffer() # Flush before search
                         if finger.finger_search() == adafruit_fingerprint.OK:
                             matched_slot = str(finger.finger_id)
-                            print(f"Match Found! Slot: {matched_slot}")
+                            confidence = finger.confidence
+                            print(f"Match Found! Slot: {matched_slot} (Conf: {confidence})")
 
-                            # Fast query student
+                            # Fast query student by fingerprintID
                             students = db.collection(COLLECTION_STUDENTS).where("fingerprintID", "==", matched_slot).limit(1).get()
 
                             if len(students) > 0:
@@ -182,13 +205,14 @@ def do_attendance():
                                 today = datetime.now().strftime("%Y-%m-%d")
                                 attendance_map = student_data.get("attendance", {})
                                 
+                                # Mark attendance if not already marked today
                                 if attendance_map.get(today) != "present":
                                     attendance_map[today] = "present"
                                     student_doc.reference.update({
                                         "attendance": attendance_map,
                                         "last_attendance": firestore.SERVER_TIMESTAMP
                                     })
-                                    print(f"Attendance marked: {student_name}")
+                                    print(f"✅ Attendance marked: {student_name}")
 
                                 # Update UI System Status for Success Screen
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
@@ -197,17 +221,20 @@ def do_attendance():
                                     "last_scan": firestore.SERVER_TIMESTAMP
                                 })
                                 
-                                time.sleep(5) # Prevent multiple triggers
-                                # Reset scan status for next student
+                                time.sleep(4) # Success pause
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
                             else:
                                 print(f"Slot {matched_slot} not linked to any student.")
                         else:
-                            print("No match found.")
+                            print("❌ No match found in sensor database.")
+                            # Optional: Update UI to show 'Try Again'
+                            db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "no_match"})
+                            time.sleep(1)
+                            db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
             except Exception as e:
-                pass
+                print("Loop error:", e)
         
-        time.sleep(0.5)
+        time.sleep(0.3)
 
 # ================= COMMAND LISTENER =================
 def listen_commands():
@@ -241,7 +268,7 @@ def listen_commands():
     query_watch.on_snapshot(on_snapshot)
 
 if __name__ == "__main__":
-    print("\n--- Attendance HUB BioSync Bridge v2.5 ---")
+    print("\n--- Attendance HUB BioSync Bridge v2.8 ---")
     setup_firebase()
     if setup_hardware():
         update_status("IDLE")

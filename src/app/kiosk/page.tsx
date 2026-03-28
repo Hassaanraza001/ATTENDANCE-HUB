@@ -19,11 +19,11 @@ import {
   ShieldCheck,
   Zap,
   Link as LinkIcon,
-  AlertTriangle
+  AlertTriangle,
+  XCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Student } from "@/lib/types";
 import { getDb } from "@/lib/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { 
@@ -88,7 +88,7 @@ function KioskContent() {
   const urlDeviceId = searchParams.get("deviceId");
   
   const [isBooting, setIsBooting] = useState(true);
-  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing">("processing");
+  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match">("processing");
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -135,11 +135,14 @@ function KioskContent() {
             setTimeout(() => setView("home"), 2000);
         }
 
-        // Attendance Success Detection (CRITICAL SYNC)
+        // Attendance Detection
         if (data.scan_status === "success" && view === "attendance") {
             setLastStudentName(data.last_student_name || "Unknown Student");
             setView("success");
-            setTimeout(() => setView("home"), 3000);
+            setTimeout(() => setView("home"), 3500);
+        } else if (data.scan_status === "no_match" && view === "attendance") {
+            setView("no-match");
+            setTimeout(() => setView("attendance"), 2000);
         }
         
         if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR") {
@@ -167,7 +170,6 @@ function KioskContent() {
     if (!currentDeviceId || !currentUserId) return;
     try {
         const db = getDb();
-        // TRIGGER COMMAND FOR PI
         await addDoc(collection(db, "kiosk_commands"), {
             type: "START_ATTENDANCE",
             deviceId: currentDeviceId,
@@ -184,7 +186,6 @@ function KioskContent() {
   const handleBack = async () => {
     const db = getDb();
     if (view === "attendance" && currentDeviceId) {
-        // STOP COMMAND FOR PI
         await addDoc(collection(db, "kiosk_commands"), {
             type: "END_ATTENDANCE",
             deviceId: currentDeviceId,
@@ -251,7 +252,7 @@ function KioskContent() {
   if (isBooting) return <BootingScreen />;
 
   return (
-    <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950")}>
+    <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950", view === "no-match" && "bg-rose-950")}>
       
       {/* MEGA HEADER */}
       <div className="h-28 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
@@ -276,7 +277,7 @@ function KioskContent() {
 
       <div className="flex-1 relative flex flex-col items-center justify-center">
         
-        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success") && (
+        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success" && view !== "no-match") && (
           <button 
             onClick={handleBack}
             className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl"
@@ -445,6 +446,18 @@ function KioskContent() {
           </div>
         )}
 
+        {view === "no-match" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in zoom-in duration-700">
+            <div className="bg-rose-500 p-24 rounded-full scale-110 shadow-[0_0_150px_rgba(244,63,94,0.6)] border-[20px] border-rose-400/40">
+                <XCircle className="h-48 w-48 text-white" />
+            </div>
+            <div className="space-y-8">
+                <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase text-glow-rose">NO MATCH</h2>
+                <p className="text-4xl text-rose-300 font-black uppercase tracking-widest">ID NOT FOUND IN DATABASE</p>
+            </div>
+          </div>
+        )}
+
         {view === "enrollment-step" && (
             <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in fade-in zoom-in duration-700">
                 <div className="relative p-16 bg-emerald-500/10 rounded-full border-[15px] border-emerald-500/20 shadow-2xl">
@@ -478,6 +491,7 @@ function KioskContent() {
         .animate-scan-line { animation: scan-line 4s linear infinite; }
         .text-glow-white { text-shadow: 0 0 40px rgba(255,255,255,0.4); }
         .text-glow-emerald { text-shadow: 0 0 60px rgba(16,185,129,0.6); }
+        .text-glow-rose { text-shadow: 0 0 60px rgba(244,63,94,0.6); }
       `}</style>
     </div>
   );
