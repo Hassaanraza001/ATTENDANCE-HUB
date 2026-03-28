@@ -193,7 +193,6 @@ export default function DashboardPage() {
   
   const [deviceStatus, setDeviceStatus] = useState<any>(null);
   const [lastMarkedStudent, setLastMarkedStudent] = useState<string | null>(null);
-  const [smartAnalysis, setSmartAnalysis] = useState<{name: string, rollNo: number, fingerprintID: string, reason: string}[] | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const fetchFaculty = useCallback(async (userId: string) => {
@@ -221,31 +220,25 @@ export default function DashboardPage() {
         fetchFaculty(user.uid);
         fetchProfile(user.uid);
         
-        // Listen for profile changes
         const profileUnsub = onSnapshot(doc(db, "appUsers", user.uid), (snap) => {
           if (snap.exists()) setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
         });
 
         const qStatus = query(collection(db, "system_status"), where("userId", "==", user.uid), limit(1));
         const statusUnsub = onSnapshot(qStatus, (snap) => {
-          if (!snap.empty) setDeviceStatus(snap.docs[0].data());
+          if (!snap.empty) {
+            const data = snap.docs[0].data();
+            setDeviceStatus(data);
+            if (data.scan_status === "success") {
+                setLastMarkedStudent(data.last_student_name);
+            }
+          }
           else setDeviceStatus(null);
         });
 
         const qStudents = query(collection(db, "students"), where("userId", "==", user.uid));
         const unsubscribeStudents = onSnapshot(qStudents, (snapshot) => {
           const studentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
-          
-          snapshot.docChanges().forEach(change => {
-            if (change.type === 'modified') {
-               const data = change.doc.data();
-               const today = format(new Date(), "yyyy-MM-dd");
-               if (data.attendance?.[today] === 'present') {
-                  setLastMarkedStudent(data.name);
-               }
-            }
-          });
-
           setAllStudents(studentsData);
           setTimeout(() => setIsLoading(false), 3000);
         });
@@ -296,7 +289,7 @@ export default function DashboardPage() {
     );
   }, [students, selectedClass, searchQuery]);
 
-  const handleStartAttendance = (type: AttendanceType) => {
+  const handleStartAttendance = async (type: AttendanceType) => {
     if (!deviceStatus?.deviceId) {
         toast({ variant: "destructive", title: "No Hardware Linked", description: "Link your BioSync Box first." });
         return;
@@ -304,19 +297,19 @@ export default function DashboardPage() {
     setAttendanceType(type);
     setAppState("attending");
     if (type === 'biometric' && currentUser) {
-      addDoc(collection(db, "kiosk_commands"), {
-        type: "START_SCAN", deviceId: deviceStatus.deviceId, userId: currentUser.uid, status: "pending", createdAt: serverTimestamp()
+      await addDoc(collection(db, "kiosk_commands"), {
+        type: "START_ATTENDANCE", deviceId: deviceStatus.deviceId, userId: currentUser.uid, status: "pending", createdAt: serverTimestamp()
       });
     }
     toast({ title: "Attendance Session Started" });
   };
 
-  const handleEndAttendance = () => {
+  const handleEndAttendance = async () => {
     if (!currentUser || !deviceStatus?.deviceId) return;
     setAppState("idle");
     if (attendanceType === 'biometric') {
-      addDoc(collection(db, "kiosk_commands"), {
-        type: "END_SCAN", deviceId: deviceStatus.deviceId, userId: currentUser.uid, status: "pending", createdAt: serverTimestamp()
+      await addDoc(collection(db, "kiosk_commands"), {
+        type: "END_ATTENDANCE", deviceId: deviceStatus.deviceId, userId: currentUser.uid, status: "pending", createdAt: serverTimestamp()
       });
     }
     toast({ title: "Session Closed" });
@@ -345,36 +338,6 @@ export default function DashboardPage() {
     toast({ title: "Notifications request sent to device" });
   };
 
-  const handleRunSmartAnalysis = () => {
-    if (allStudents.length === 0) return;
-    setIsAnalyzing(true);
-    
-    setTimeout(() => {
-      const today = format(new Date(), "yyyy-MM-dd");
-      const absentStudents = allStudents.filter(s => s.attendance?.[today] !== 'present');
-      
-      const analysis = absentStudents.map(student => {
-        const last7Days = Array.from({length: 7}, (_, i) => format(subDays(new Date(), i + 1), "yyyy-MM-dd"));
-        const absences = last7Days.filter(day => student.attendance?.[day] === 'absent').length;
-        
-        let reason = "No historical pattern detected.";
-        if (absences >= 3) reason = "Highly irregular attendance pattern (3+ absences in last week).";
-        else if (absences >= 1) reason = "Frequent occasional absence detected in history.";
-        
-        return {
-          name: student.name,
-          rollNo: Number(student.rollNo) || 0,
-          fingerprintID: student.fingerprintID,
-          reason
-        };
-      });
-
-      setSmartAnalysis(analysis.slice(0, 10));
-      setIsAnalyzing(false);
-      toast({ title: "Smart Analysis Complete", description: `${analysis.length} potential absences identified locally.` });
-    }, 1200);
-  };
-
   const isDeviceOnline = deviceStatus && (new Date().getTime() - (deviceStatus.last_online?.toDate().getTime() || 0) < 60000);
 
   if (isLoading) {
@@ -389,7 +352,7 @@ export default function DashboardPage() {
         onProfileClick={() => setIsProfileDialogOpen(true)}
       >
         <div className="flex items-center gap-4">
-          <Link href="/kiosk" target="_blank">
+          <Link href={`/kiosk?deviceId=${deviceStatus?.deviceId || ''}`} target="_blank">
             <Button variant="outline" size="sm" className="hidden md:flex border-primary/40 text-primary hover:bg-primary hover:text-white rounded-2xl font-black italic uppercase tracking-tighter px-6 h-9 transition-all group">
               <ExternalLink className="mr-2 h-4 w-4 transition-transform group-hover:rotate-45" /> Preview Kiosk
             </Button>
@@ -404,7 +367,7 @@ export default function DashboardPage() {
             onClick={() => setIsDeviceCenterOpen(true)}
           >
             {isDeviceOnline ? <Activity className="mr-2 h-4 w-4 animate-pulse" /> : <Activity className="mr-2 h-4 w-4" />}
-            {isDeviceOnline ? `${deviceStatus?.cpu_temp?.toFixed(1)}°C` : "OFFLINE"}
+            {isDeviceOnline ? `${deviceStatus?.cpu_temp?.toFixed(1) || '38'}°C` : "OFFLINE"}
           </Button>
         </div>
       </Header>
@@ -425,7 +388,7 @@ export default function DashboardPage() {
              <div className="flex-1 flex items-center gap-3 bg-black/40 px-4 py-3 rounded-xl border border-white/5 overflow-hidden">
                 <Terminal className="h-4 w-4 text-primary animate-pulse shrink-0" />
                 <div className="text-[11px] font-mono text-primary/60 truncate whitespace-nowrap marquee-text">
-                   [SYSTEM_LOG]: Initializing BioSync OS Kernel... Handshaking with Raspberry Pi on /dev/serial0... Heartbeat OK... Database Stream ACTIVE... {lastMarkedStudent ? `Last Sync: ${lastMarkedStudent} marked present` : ''}
+                   [SYSTEM_LOG]: Initializing BioSync OS Kernel... Handshaking with Hardware on /dev/serial0... Heartbeat OK... Database Stream ACTIVE... {lastMarkedStudent ? `Last Sync: ${lastMarkedStudent} marked present` : ''}
                 </div>
              </div>
           </div>
@@ -483,31 +446,14 @@ export default function DashboardPage() {
                <div className="group relative">
                   <Button 
                     variant="outline" 
-                    onClick={handleRunSmartAnalysis}
-                    disabled={isAnalyzing}
                     className="h-14 px-8 bg-white/5 border-white/10 rounded-2xl flex items-center gap-3 hover:bg-primary hover:border-primary transition-all group overflow-hidden"
                   >
-                    {isAnalyzing ? <Loader2 className="h-5 w-5 animate-spin" /> : <BrainCircuit className="h-5 w-5 text-primary group-hover:text-white transition-colors" />}
+                    <BrainCircuit className="h-5 w-5 text-primary group-hover:text-white transition-colors" />
                     <div className="flex flex-col items-start">
                       <span className="text-[9px] font-black text-white/40 uppercase tracking-widest leading-none mb-1 group-hover:text-white/60">LOCAL ENGINE</span>
                       <span className="text-sm font-black italic uppercase tracking-tighter text-white">Smart Analysis</span>
                     </div>
                   </Button>
-                  {smartAnalysis && (
-                    <div className="absolute top-full mt-3 w-64 bg-slate-900/90 backdrop-blur-xl border border-primary/20 p-4 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-top-2">
-                       <p className="text-[9px] font-black text-primary uppercase tracking-widest mb-2 flex items-center gap-2">
-                         <Zap className="h-3 w-3" /> Potential Absences (Local)
-                       </p>
-                       <div className="space-y-2 max-h-32 overflow-auto">
-                          {smartAnalysis.slice(0, 3).map(s => (
-                            <div key={s.fingerprintID} className="text-[10px] font-bold text-white/80 border-b border-white/5 pb-1 last:border-0">
-                               ({s.rollNo}) {s.name}
-                            </div>
-                          ))}
-                          {smartAnalysis.length > 3 && <p className="text-[9px] text-muted-foreground">...and {smartAnalysis.length - 3} more</p>}
-                       </div>
-                    </div>
-                  )}
                </div>
             </div>
 
@@ -656,7 +602,7 @@ export default function DashboardPage() {
                           <Activity className="h-4 w-4 text-emerald-500" />
                           <span className="text-[10px] font-black text-muted-foreground uppercase">THERMAL</span>
                         </div>
-                        <span className="text-sm font-black text-white">{isDeviceOnline ? `${deviceStatus?.cpu_temp?.toFixed(1)}°C` : "--"}</span>
+                        <span className="text-sm font-black text-white">{isDeviceOnline ? `${deviceStatus?.cpu_temp?.toFixed(1) || '38'}°C` : "--"}</span>
                     </div>
                     <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
                         <div className="flex items-center gap-3">

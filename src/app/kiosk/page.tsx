@@ -35,7 +35,8 @@ import {
   query,
   where,
   setDoc,
-  getCountFromServer
+  getCountFromServer,
+  updateDoc
 } from "firebase/firestore";
 
 const KEYBOARD_LAYOUT = [
@@ -92,7 +93,7 @@ function KioskContent() {
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<any>(null);
-  const [lastStudent, setLastStudent] = useState<Student | null>(null);
+  const [lastStudentName, setLastStudentName] = useState<string | null>(null);
   const [studentCount, setStudentCount] = useState(0);
   const [isCaps, setIsCaps] = useState(true);
   const { toast } = useToast();
@@ -133,6 +134,20 @@ function KioskContent() {
         if (data.enrollment_status === "SUCCESS") {
             setTimeout(() => setView("home"), 2000);
         }
+
+        // Attendance Success Detection (CRITICAL SYNC)
+        if (data.scan_status === "success" && view === "attendance") {
+            setLastStudentName(data.last_student_name || "Unknown Student");
+            setView("success");
+            setTimeout(() => setView("home"), 3000);
+        }
+        
+        if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR") {
+            setTimeout(() => {
+                updateDoc(statusRef, { enrollment_status: "IDLE" });
+                setView("registration");
+            }, 4000);
+        }
       } else if (serial) {
         setDoc(statusRef, { 
             deviceId: serial, 
@@ -140,33 +155,44 @@ function KioskContent() {
             status: "online", 
             last_online: serverTimestamp(), 
             hardware_ready: true, 
-            templates_stored: 0 
+            templates_stored: 0,
+            enrollment_status: "IDLE",
+            scan_status: "idle"
         });
       }
     });
   }, [urlDeviceId, view]);
 
-  useEffect(() => {
-    if (view === "attendance" && currentUserId) {
+  const handleStartAttendance = async () => {
+    if (!currentDeviceId || !currentUserId) return;
+    try {
         const db = getDb();
-        const today = format(new Date(), "yyyy-MM-dd");
-        const q = query(collection(db, "students"), where("userId", "==", currentUserId));
-        return onSnapshot(q, (snapshot) => {
-            snapshot.docChanges().forEach((change) => {
-                if (change.type === "modified") {
-                    const studentData = { id: change.doc.id, ...change.doc.data() } as Student;
-                    if (studentData.attendance?.[today] === "present") {
-                        setLastStudent(studentData);
-                        setView("success");
-                        setTimeout(() => setView("home"), 3000);
-                    }
-                }
-            });
+        // TRIGGER COMMAND FOR PI
+        await addDoc(collection(db, "kiosk_commands"), {
+            type: "START_ATTENDANCE",
+            deviceId: currentDeviceId,
+            userId: currentUserId,
+            status: "pending",
+            createdAt: serverTimestamp()
+        });
+        setView("attendance");
+    } catch (e) {
+        toast({ variant: "destructive", title: "Error", description: "Failed to trigger attendance." });
+    }
+  };
+
+  const handleBack = async () => {
+    const db = getDb();
+    if (view === "attendance" && currentDeviceId) {
+        // STOP COMMAND FOR PI
+        await addDoc(collection(db, "kiosk_commands"), {
+            type: "END_ATTENDANCE",
+            deviceId: currentDeviceId,
+            status: "pending",
+            createdAt: serverTimestamp()
         });
     }
-  }, [view, currentUserId]);
-
-  const handleBack = () => {
+    
     if (view === "enrollment-step") setView("registration");
     else if (view === "registration" || view === "attendance") { setView("home"); setActiveInput(null); }
     else if (activeInput) setActiveInput(null);
@@ -193,6 +219,8 @@ function KioskContent() {
     }
     try {
       const db = getDb();
+      await updateDoc(doc(db, "system_status", currentDeviceId), { enrollment_status: "PREPARING" });
+      
       const docRef = await addDoc(collection(db, "students"), {
         name: regData.name, rollNo: Number(regData.rollNo), 
         className: regData.class || "10A", phone: regData.phone ? `+91${regData.phone}` : "",
@@ -208,6 +236,7 @@ function KioskContent() {
 
   const getEnrollmentMessage = () => {
     switch(systemStatus?.enrollment_status) {
+        case "PREPARING": return "CALIBRATING SENSOR...";
         case "PLACE_FINGER": return "PLACE FINGER ON SENSOR";
         case "REMOVE_FINGER": return "REMOVE YOUR FINGER";
         case "PLACE_AGAIN": return "PLACE SAME FINGER AGAIN";
@@ -215,7 +244,7 @@ function KioskContent() {
         case "ERROR_IMAGE": return "SCAN ERROR! TRY AGAIN";
         case "MATCH_ERROR": return "FINGERS DO NOT MATCH";
         case "HARDWARE_ERROR": return "SENSOR BUSY! RESTARTING...";
-        default: return "WAITING FOR SCAN...";
+        default: return "INITIALIZING...";
     }
   };
 
@@ -293,7 +322,7 @@ function KioskContent() {
 
             <div className="flex gap-12 w-full max-w-[1400px]">
                 <button 
-                    onClick={() => setView("attendance")} 
+                    onClick={handleStartAttendance} 
                     className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl"
                 >
                     <div className="p-8 bg-primary/10 rounded-full border border-primary/20">
@@ -411,7 +440,7 @@ function KioskContent() {
             </div>
             <div className="space-y-8">
                 <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase text-glow-emerald">PRESENT</h2>
-                <p className="text-6xl text-emerald-300 font-black uppercase tracking-widest">{lastStudent?.name}</p>
+                <p className="text-6xl text-emerald-300 font-black uppercase tracking-widest">{lastStudentName}</p>
             </div>
           </div>
         )}
