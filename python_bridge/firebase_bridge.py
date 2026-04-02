@@ -1,3 +1,4 @@
+
 import firebase_admin
 from firebase_admin import credentials, firestore
 import time
@@ -12,6 +13,7 @@ SERVICE_ACCOUNT_KEY_FILENAME = "serviceAccountKey.json"
 
 COLLECTION_COMMANDS = "kiosk_commands"
 COLLECTION_STATUS = "system_status"
+COLLECTION_INSTITUTES = "institutes"
 
 HEARTBEAT_INTERVAL = 15 
 
@@ -121,7 +123,7 @@ def enroll(student_id, user_id):
     global is_enrolling
     with sensor_lock:
         is_enrolling = True
-        print(f"\n--- ENROLLMENT INITIATED: {student_id} (User: {user_id}) ---")
+        print(f"\n--- ENROLLMENT INITIATED: {student_id} (Institute: {user_id}) ---")
         
         try:
             update_ui_status("PLACE_FINGER")
@@ -142,13 +144,11 @@ def enroll(student_id, user_id):
             if finger.create_model() == adafruit_fingerprint.OK:
                 location = get_free_location()
                 if location:
-                    # Clean the slot first
                     finger.delete_model(location)
                     if finger.store_model(location) == adafruit_fingerprint.OK:
-                        # Verify save
                         if finger.load_model(location) == adafruit_fingerprint.OK:
-                            # Update student document in the specific user sub-collection
-                            student_ref = db.collection("appUsers").document(user_id).collection("students").document(student_id)
+                            # Update student in institutes sub-collection
+                            student_ref = db.collection(COLLECTION_INSTITUTES).document(user_id).collection("students").document(student_id)
                             student_ref.update({
                                 "fingerprintID": str(location),
                                 "updatedAt": firestore.SERVER_TIMESTAMP
@@ -156,7 +156,6 @@ def enroll(student_id, user_id):
                             print(f"SUCCESS: Student {student_id} saved to Slot {location}")
                             update_ui_status("SUCCESS")
                         else:
-                            print("VERIFY FAIL: Model not found in slot after storing")
                             update_ui_status("HARDWARE_ERROR")
                     else:
                         update_ui_status("HARDWARE_ERROR")
@@ -187,27 +186,22 @@ def do_attendance_loop():
             try:
                 if finger.get_image() == adafruit_fingerprint.OK:
                     print("Finger detected! Matching...")
-                    time.sleep(0.5) # Wait for stabilization
+                    time.sleep(0.5)
                     
                     if finger.image_2_tz(1) == adafruit_fingerprint.OK:
                         if finger.finger_search() == adafruit_fingerprint.OK:
                             matched_slot = str(finger.finger_id)
-                            confidence = finger.confidence
-                            print(f"Match! Slot: {matched_slot} (Conf: {confidence})")
+                            print(f"Match! Slot: {matched_slot}")
 
-                            # Get the user paired with this physical device
                             status_doc = db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).get()
                             current_userId = status_doc.to_dict().get("userId")
 
                             if not current_userId:
-                                print("Access Denied: Device not paired with any institute.")
-                                db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "no_match"})
-                                time.sleep(2)
-                                db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
+                                print("Access Denied: Device not paired.")
                                 continue
 
-                            # Query only the paired institute's student roster for this Slot
-                            students_ref = db.collection("appUsers").document(current_userId).collection("students")
+                            # Query only the paired institute's students
+                            students_ref = db.collection(COLLECTION_INSTITUTES).document(current_userId).collection("students")
                             query = students_ref.where("fingerprintID", "==", matched_slot).limit(1).stream()
                             
                             found = False
@@ -215,8 +209,6 @@ def do_attendance_loop():
                                 found = True
                                 student_data = s_doc.to_dict()
                                 student_name = student_data.get('name', 'Unknown')
-                                
-                                # Attendance logic
                                 today = datetime.now().strftime("%Y-%m-%d")
                                 attendance_map = student_data.get("attendance", {})
                                 attendance_map[today] = "present"
@@ -237,12 +229,11 @@ def do_attendance_loop():
                                 break
                             
                             if not found:
-                                print(f"SECURITY: Slot {matched_slot} belongs to another user/institute.")
+                                print(f"SECURITY: Slot {matched_slot} belongs to another institute.")
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "no_match"})
                                 time.sleep(2)
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
                         else:
-                            print("❌ No match found in sensor database.")
                             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "no_match"})
                             time.sleep(2)
                             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
@@ -268,16 +259,11 @@ def listen_commands():
                     
                     if cmd_type == "ENROLL":
                         threading.Thread(target=enroll, args=(data.get("studentId"), data.get("userId"))).start()
-                    
                     elif cmd_type == "START_ATTENDANCE":
                         attendance_mode = True
-                        print(">>> ATTENDANCE MODE ON")
-                    
                     elif cmd_type == "END_ATTENDANCE":
                         attendance_mode = False
-                        print(">>> ATTENDANCE MODE OFF")
                         update_ui_status("IDLE")
-                    
                     elif cmd_type == "RESET_SENSOR":
                         with sensor_lock:
                             print("!!! EXECUTING FACTORY RESET !!!")
@@ -294,7 +280,7 @@ def listen_commands():
     db.collection(COLLECTION_COMMANDS).where("status", "==", "pending").on_snapshot(on_snapshot)
 
 if __name__ == "__main__":
-    print("\n--- Attendance HUB BioSync v9.0 (Isolated) ---")
+    print("\n--- Attendance HUB BioSync v10.0 (Isolated) ---")
     if setup_firebase():
         if setup_hardware():
             update_ui_status("IDLE")

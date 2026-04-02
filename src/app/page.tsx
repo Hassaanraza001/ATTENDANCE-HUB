@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -146,7 +147,7 @@ export default function DashboardPage() {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  // 1. ALL STATES INITIALIZED AT TOP
+  // STATES - All hooks at the top in correct order
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -177,7 +178,7 @@ export default function DashboardPage() {
   const auth = getAuthInstance();
   const db = getDb();
 
-  // 2. CALLBACKS
+  // CALLBACKS
   const fetchFaculty = useCallback(async (userId: string) => {
     try {
       const facultiesFromDB = await getFaculties(userId);
@@ -189,7 +190,7 @@ export default function DashboardPage() {
 
   const initProfile = useCallback(async (userId: string) => {
     try {
-      const docRef = doc(db, "appUsers", userId);
+      const docRef = doc(db, "institutes", userId);
       const docSnap = await getDoc(docRef);
       if (!docSnap.exists()) {
         const initialProfile = {
@@ -207,7 +208,7 @@ export default function DashboardPage() {
     }
   }, [auth, db]);
 
-  // 3. MAIN AUTH & DATA SYNC EFFECT
+  // MAIN AUTH & DATA SYNC EFFECT
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       if (user) {
@@ -216,9 +217,13 @@ export default function DashboardPage() {
         await fetchFaculty(user.uid);
         
         // Live Profile Sync
-        const profileUnsub = onSnapshot(doc(db, "appUsers", user.uid), (snap) => {
-          if (snap.exists()) setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
-        }, (err) => console.log("Profile Sync Waiting..."));
+        const profileUnsub = onSnapshot(doc(db, "institutes", user.uid), (snap) => {
+          if (snap.exists()) {
+            setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
+          }
+        }, (err) => {
+          console.log("Profile Sync Muted:", err.message);
+        });
 
         // Live Device Status Sync
         const qStatus = query(collection(db, "system_status"), where("userId", "==", user.uid), limit(1));
@@ -232,16 +237,18 @@ export default function DashboardPage() {
           } else {
             setDeviceStatus(null);
           }
-        }, (err) => console.log("Status Sync Waiting..."));
+        }, (err) => {
+          console.log("Status Sync Muted:", err.message);
+        });
 
-        // Live Students Sync (Scoped to Sub-collection)
-        const qStudents = collection(db, "appUsers", user.uid, "students");
+        // Live Students Sync
+        const qStudents = collection(db, "institutes", user.uid, "students");
         const unsubscribeStudents = onSnapshot(qStudents, (snapshot) => {
           const studentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
           setAllStudents(studentsData);
-          setIsLoading(false); // FINALLY STOP LOADING
+          setIsLoading(false); 
         }, (err) => {
-          console.log("Students Sync Error:", err.message);
+          console.log("Students Sync Muted:", err.message);
           setIsLoading(false);
         });
 
@@ -258,7 +265,7 @@ export default function DashboardPage() {
     return () => unsubscribeAuth();
   }, [router, auth, db, fetchFaculty, initProfile]);
 
-  // 4. MEMOIZED VALUES
+  // MEMOIZED VALUES
   const students = useMemo(() => {
     if (!currentUser) return [];
     const dateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : "";
@@ -292,7 +299,7 @@ export default function DashboardPage() {
     );
   }, [students, selectedClass, searchQuery]);
 
-  // 5. HANDLERS
+  // HANDLERS
   const handleStartAttendance = async (type: AttendanceType) => {
     if (!deviceStatus?.deviceId) {
         toast({ variant: "destructive", title: "No Hardware Linked", description: "Link your BioSync Box first." });

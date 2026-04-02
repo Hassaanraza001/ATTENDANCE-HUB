@@ -29,7 +29,7 @@ function sanitizeData(data: any) {
 }
 
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
-  const docRef = doc(getDb(), "appUsers", userId);
+  const docRef = doc(getDb(), "institutes", userId);
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
     return { id: docSnap.id, ...docSnap.data() } as UserProfile;
@@ -38,7 +38,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 }
 
 export async function updateUserProfile(userId: string, data: Partial<Omit<UserProfile, 'id' | 'email'>>): Promise<void> {
-  const docRef = doc(getDb(), "appUsers", userId);
+  const docRef = doc(getDb(), "institutes", userId);
   await setDoc(docRef, { 
     ...sanitizeData(data), 
     updatedAt: serverTimestamp() 
@@ -47,30 +47,30 @@ export async function updateUserProfile(userId: string, data: Partial<Omit<UserP
 
 export async function getStudents(userId: string): Promise<Student[]> {
   const db = getDb();
-  const q = collection(db, "appUsers", userId, "students");
+  const q = collection(db, "institutes", userId, "students");
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
 }
 
 export async function addStudent(userId: string, student: Omit<Student, "id">): Promise<string> {
   const db = getDb();
-  const docRef = await addDoc(collection(db, "appUsers", userId, "students"), sanitizeData(student));
+  const docRef = await addDoc(collection(db, "institutes", userId, "students"), sanitizeData(student));
   return docRef.id;
 }
 
 export async function updateStudent(userId: string, studentId: string, data: Partial<Omit<Student, 'id'>>): Promise<void> {
-    await updateDoc(doc(getDb(), "appUsers", userId, "students", studentId), sanitizeData(data)); 
+    await updateDoc(doc(getDb(), "institutes", userId, "students", studentId), sanitizeData(data)); 
 }
 
 export async function deleteStudent(userId: string, studentId: string): Promise<void> {
-  await deleteDoc(doc(getDb(), "appUsers", userId, "students", studentId));
+  await deleteDoc(doc(getDb(), "institutes", userId, "students", studentId));
 }
 
 export async function updateStudentsAttendance(userId: string, updates: { studentId: string; attendance: Record<string, 'present' | 'absent'> }[]) {
   const db = getDb();
   const batch = writeBatch(db);
   updates.forEach(({ studentId, attendance }) => {
-    batch.update(doc(db, "appUsers", userId, "students", studentId), { attendance });
+    batch.update(doc(db, "institutes", userId, "students", studentId), { attendance });
   });
   await batch.commit();
 }

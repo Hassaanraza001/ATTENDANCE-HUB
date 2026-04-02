@@ -36,7 +36,8 @@ import {
   where,
   setDoc,
   getCountFromServer,
-  updateDoc
+  updateDoc,
+  getDoc
 } from "firebase/firestore";
 
 const KEYBOARD_LAYOUT = [
@@ -119,7 +120,6 @@ function KioskContent() {
 
     const statusRef = doc(db, "system_status", serial);
     
-    // Add error handler to prevent permission-denied noise in logs during initial load
     const unsubscribeStatus = onSnapshot(statusRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data();
@@ -129,9 +129,9 @@ function KioskContent() {
         if (data.userId) {
           if (view === "pairing" || view === "processing") setView("home");
           
-          // Count students in the institute sub-collection
           try {
-            const qCount = collection(db, "appUsers", data.userId, "students");
+            // Count students in the specific institute's sub-collection
+            const qCount = collection(db, "institutes", data.userId, "students");
             const countSnap = await getCountFromServer(qCount);
             setStudentCount(countSnap.data().count);
           } catch (e) {
@@ -157,7 +157,7 @@ function KioskContent() {
         
         if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR") {
             setTimeout(() => {
-                updateDoc(statusRef, { enrollment_status: "IDLE" });
+                updateDoc(statusRef, { enrollment_status: "IDLE" }).catch(e => console.error("Status reset error:", e));
                 setView("registration");
             }, 4000);
         }
@@ -171,9 +171,11 @@ function KioskContent() {
             templates_stored: 0,
             enrollment_status: "IDLE",
             scan_status: "idle"
-        }, { merge: true });
+        }, { merge: true }).catch(e => console.error("Initial setDoc error:", e));
       }
-    }, (err) => console.log("Kiosk Status Listener Error (Waiting for Sync):", err.message));
+    }, (err) => {
+      console.log("Kiosk Status Listener Error:", err.message);
+    });
 
     return () => unsubscribeStatus();
   }, [urlDeviceId, view]);
@@ -225,26 +227,56 @@ function KioskContent() {
   };
 
   const handleRegistration = async () => {
-    if (!currentUserId || !currentDeviceId) return;
-    if (!regData.name || !regData.rollNo) {
-      toast({ variant: "destructive", title: "Input Missing", description: "Name/Roll No required." });
+    if (!currentUserId || !currentDeviceId) {
+      toast({ variant: "destructive", title: "Pairing Required", description: "This device is not linked to any institute." });
       return;
     }
+    if (!regData.name || !regData.rollNo) {
+      toast({ variant: "destructive", title: "Input Missing", description: "Name and Roll No are required." });
+      return;
+    }
+    
     try {
       const db = getDb();
+      
+      // 1. Update status to preparing
       await updateDoc(doc(db, "system_status", currentDeviceId), { enrollment_status: "PREPARING" });
       
-      const docRef = await addDoc(collection(db, "appUsers", currentUserId, "students"), {
-        name: regData.name, rollNo: Number(regData.rollNo), 
-        className: regData.class || "10A", phone: regData.phone ? `+91${regData.phone}` : "",
-        fingerprintID: "NOT_ENROLLED", attendance: {}, userId: currentUserId, createdAt: serverTimestamp()
+      // 2. Add student to institute section
+      // Path: institutes/{userId}/students/{studentId}
+      const studentCol = collection(db, "institutes", currentUserId, "students");
+      const docRef = await addDoc(studentCol, {
+        name: regData.name, 
+        rollNo: Number(regData.rollNo), 
+        className: regData.class || "10A", 
+        phone: regData.phone ? `+91${regData.phone}` : "",
+        fingerprintID: "NOT_ENROLLED", 
+        attendance: {}, 
+        userId: currentUserId, 
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
+
+      // 3. Command Pi to start enrollment
       await addDoc(collection(db, "kiosk_commands"), {
-        type: "ENROLL", studentId: docRef.id, userId: currentUserId, studentName: regData.name, 
-        deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
+        type: "ENROLL", 
+        studentId: docRef.id, 
+        userId: currentUserId, 
+        studentName: regData.name, 
+        deviceId: currentDeviceId, 
+        status: "pending", 
+        createdAt: serverTimestamp()
       });
+
       setView("enrollment-step");
-    } catch (e) { toast({ variant: "destructive", title: "DB Error" }); }
+    } catch (e: any) { 
+      console.error("Registration Error:", e);
+      toast({ 
+        variant: "destructive", 
+        title: "Registration Failed", 
+        description: e.message || "Database Error." 
+      }); 
+    }
   };
 
   const getEnrollmentMessage = () => {
