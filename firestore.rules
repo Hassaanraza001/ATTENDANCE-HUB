@@ -2,43 +2,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper functions
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    // --- App Users (Profiles) & Students ---
-    match /appUsers/{userId} {
-      // Profile can only be read/written by the owner
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
-      
-      // Students sub-collection - accessible by anyone (Kiosk/Pi needs this)
-      // We allow list operations on the collection too
-      match /students/{studentId} {
-        allow read, write: if true;
-      }
-    }
-
-    // --- System Status (Heartbeat & Pairing) ---
-    // Globally accessible for matching and heartbeat
-    match /system_status/{deviceId} {
-      allow read, write: if true;
-    }
-
-    // --- Kiosk Commands ---
-    match /kiosk_commands/{commandId} {
-      allow read, write: if true;
-    }
-
-    // --- Faculty ---
-    match /faculties/{facultyId} {
-      allow read, write: if isSignedIn();
-    }
-
-    // Default deny for everything else
+    // FULL KHULI CHOOTH: Allowing all reads and writes to all collections
+    // This ensures Kiosk, Dashboard, and Raspberry Pi can sync without permission errors.
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }
