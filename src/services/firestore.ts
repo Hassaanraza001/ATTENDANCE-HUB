@@ -1,3 +1,4 @@
+
 import { getDb } from "@/lib/firebase";
 import type { Student, Faculty, UserProfile } from "@/lib/types";
 import { 
@@ -46,30 +47,30 @@ export async function updateUserProfile(userId: string, data: Partial<Omit<UserP
 
 export async function getStudents(userId: string): Promise<Student[]> {
   const db = getDb();
-  const q = query(collection(db, "students"), where("userId", "==", userId));
+  const q = collection(db, "appUsers", userId, "students");
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
 }
 
-export async function addStudent(student: Omit<Student, "id">): Promise<string> {
+export async function addStudent(userId: string, student: Omit<Student, "id">): Promise<string> {
   const db = getDb();
-  const docRef = await addDoc(collection(db, "students"), sanitizeData(student));
+  const docRef = await addDoc(collection(db, "appUsers", userId, "students"), sanitizeData(student));
   return docRef.id;
 }
 
-export async function updateStudent(studentId: string, data: Partial<Omit<Student, 'id'>>): Promise<void> {
-    await updateDoc(doc(getDb(), "students", studentId), sanitizeData(data)); 
+export async function updateStudent(userId: string, studentId: string, data: Partial<Omit<Student, 'id'>>): Promise<void> {
+    await updateDoc(doc(getDb(), "appUsers", userId, "students", studentId), sanitizeData(data)); 
 }
 
-export async function deleteStudent(studentId: string): Promise<void> {
-  await deleteDoc(doc(getDb(), "students", studentId));
+export async function deleteStudent(userId: string, studentId: string): Promise<void> {
+  await deleteDoc(doc(getDb(), "appUsers", userId, "students", studentId));
 }
 
-export async function updateStudentsAttendance(updates: { studentId: string; attendance: Record<string, 'present' | 'absent'> }[]) {
+export async function updateStudentsAttendance(userId: string, updates: { studentId: string; attendance: Record<string, 'present' | 'absent'> }[]) {
   const db = getDb();
   const batch = writeBatch(db);
   updates.forEach(({ studentId, attendance }) => {
-    batch.update(doc(db, "students", studentId), { attendance });
+    batch.update(doc(db, "appUsers", userId, "students", studentId), { attendance });
   });
   await batch.commit();
 }

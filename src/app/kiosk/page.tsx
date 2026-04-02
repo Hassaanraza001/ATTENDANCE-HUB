@@ -118,7 +118,9 @@ function KioskContent() {
     setCurrentDeviceId(serial);
 
     const statusRef = doc(db, "system_status", serial);
-    return onSnapshot(statusRef, async (snap) => {
+    
+    // Add error handler to prevent permission-denied noise in logs during initial load
+    const unsubscribeStatus = onSnapshot(statusRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         setSystemStatus(data);
@@ -126,10 +128,18 @@ function KioskContent() {
         
         if (data.userId) {
           if (view === "pairing" || view === "processing") setView("home");
-          const qCount = query(collection(db, "students"), where("userId", "==", data.userId));
-          const countSnap = await getCountFromServer(qCount);
-          setStudentCount(countSnap.data().count);
-        } else setView("pairing");
+          
+          // Count students in the institute sub-collection
+          try {
+            const qCount = collection(db, "appUsers", data.userId, "students");
+            const countSnap = await getCountFromServer(qCount);
+            setStudentCount(countSnap.data().count);
+          } catch (e) {
+            console.error("Student count error:", e);
+          }
+        } else {
+          setView("pairing");
+        }
 
         if (data.enrollment_status === "SUCCESS") {
             setTimeout(() => setView("home"), 2000);
@@ -161,9 +171,11 @@ function KioskContent() {
             templates_stored: 0,
             enrollment_status: "IDLE",
             scan_status: "idle"
-        });
+        }, { merge: true });
       }
-    });
+    }, (err) => console.log("Kiosk Status Listener Error (Waiting for Sync):", err.message));
+
+    return () => unsubscribeStatus();
   }, [urlDeviceId, view]);
 
   const handleStartAttendance = async () => {
@@ -222,13 +234,13 @@ function KioskContent() {
       const db = getDb();
       await updateDoc(doc(db, "system_status", currentDeviceId), { enrollment_status: "PREPARING" });
       
-      const docRef = await addDoc(collection(db, "students"), {
+      const docRef = await addDoc(collection(db, "appUsers", currentUserId, "students"), {
         name: regData.name, rollNo: Number(regData.rollNo), 
         className: regData.class || "10A", phone: regData.phone ? `+91${regData.phone}` : "",
         fingerprintID: "NOT_ENROLLED", attendance: {}, userId: currentUserId, createdAt: serverTimestamp()
       });
       await addDoc(collection(db, "kiosk_commands"), {
-        type: "ENROLL", studentId: docRef.id, studentName: regData.name, 
+        type: "ENROLL", studentId: docRef.id, userId: currentUserId, studentName: regData.name, 
         deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
       });
       setView("enrollment-step");
