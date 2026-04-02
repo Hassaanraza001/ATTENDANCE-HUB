@@ -8,29 +8,27 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // --- System Status (For Raspberry Pi Heartbeat & Pairing) ---
+    // --- App Users (Profiles) & Students ---
+    match /appUsers/{userId} {
+      // Profile can only be read/written by the owner
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      
+      // Students sub-collection - accessible by anyone (Kiosk/Pi needs this)
+      // We allow list operations on the collection too
+      match /students/{studentId} {
+        allow read, write: if true;
+      }
+    }
+
+    // --- System Status (Heartbeat & Pairing) ---
+    // Globally accessible for matching and heartbeat
     match /system_status/{deviceId} {
-      // Allow the device (anonymous) to update its status and enrollment progress
-      allow read, write: if true; 
+      allow read, write: if true;
     }
 
-    // --- Kiosk Commands (For Enrollment & Remote Actions) ---
+    // --- Kiosk Commands ---
     match /kiosk_commands/{commandId} {
-      // Allow Kiosk UI and Dashboard to send commands, and Pi to read/update them
       allow read, write: if true;
-    }
-
-    // --- Students (Unified Collection) ---
-    match /students/{studentId} {
-      // Unified top-level access for MVP simplicity and cross-device sync
-      allow read, write: if true;
-    }
-
-    // --- App Users (Profiles) ---
-    match /appUsers/{appUserId} {
-      allow get, list: if isSignedIn() && request.auth.uid == appUserId;
-      allow create: if isSignedIn() && request.auth.uid == appUserId;
-      allow update: if isSignedIn() && request.auth.uid == appUserId;
     }
 
     // --- Faculty ---
@@ -38,7 +36,7 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
-    // Default deny
+    // Default deny for everything else
     match /{document=**} {
       allow read, write: if false;
     }
