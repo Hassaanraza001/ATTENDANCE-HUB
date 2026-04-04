@@ -20,7 +20,8 @@ import {
   Zap,
   Link as LinkIcon,
   AlertTriangle,
-  XCircle
+  XCircle,
+  Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -89,7 +90,7 @@ function KioskContent() {
   const urlDeviceId = searchParams.get("deviceId");
   
   const [isBooting, setIsBooting] = useState(true);
-  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match">("processing");
+  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match" | "searching">("processing");
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -130,7 +131,6 @@ function KioskContent() {
           if (view === "pairing" || view === "processing") setView("home");
           
           try {
-            // Count students in the specific institute's sub-collection
             const qCount = collection(db, "institutes", data.userId, "students");
             const countSnap = await getCountFromServer(qCount);
             setStudentCount(countSnap.data().count);
@@ -145,14 +145,18 @@ function KioskContent() {
             setTimeout(() => setView("home"), 2000);
         }
 
-        // Attendance Detection
-        if (data.scan_status === "success" && view === "attendance") {
-            setLastStudentName(data.last_student_name || "Unknown Student");
-            setView("success");
-            setTimeout(() => setView("home"), 3500);
-        } else if (data.scan_status === "no_match" && view === "attendance") {
-            setView("no-match");
-            setTimeout(() => setView("attendance"), 2000);
+        // Attendance Status Handling
+        if (view === "attendance" || view === "searching") {
+            if (data.scan_status === "searching") {
+                setView("searching");
+            } else if (data.scan_status === "success") {
+                setLastStudentName(data.last_student_name || "Unknown Student");
+                setView("success");
+                setTimeout(() => setView("home"), 3500);
+            } else if (data.scan_status === "no_match") {
+                setView("no-match");
+                setTimeout(() => setView("attendance"), 2000);
+            }
         }
         
         if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR") {
@@ -199,7 +203,7 @@ function KioskContent() {
 
   const handleBack = async () => {
     const db = getDb();
-    if (view === "attendance" && currentDeviceId) {
+    if ((view === "attendance" || view === "searching") && currentDeviceId) {
         await addDoc(collection(db, "kiosk_commands"), {
             type: "END_ATTENDANCE",
             deviceId: currentDeviceId,
@@ -209,7 +213,7 @@ function KioskContent() {
     }
     
     if (view === "enrollment-step") setView("registration");
-    else if (view === "registration" || view === "attendance") { setView("home"); setActiveInput(null); }
+    else if (view === "registration" || view === "attendance" || view === "searching") { setView("home"); setActiveInput(null); }
     else if (activeInput) setActiveInput(null);
   };
 
@@ -238,12 +242,8 @@ function KioskContent() {
     
     try {
       const db = getDb();
-      
-      // 1. Update status to preparing
       await updateDoc(doc(db, "system_status", currentDeviceId), { enrollment_status: "PREPARING" });
       
-      // 2. Add student to institute section
-      // Path: institutes/{userId}/students/{studentId}
       const studentCol = collection(db, "institutes", currentUserId, "students");
       const docRef = await addDoc(studentCol, {
         name: regData.name, 
@@ -257,7 +257,6 @@ function KioskContent() {
         updatedAt: serverTimestamp()
       });
 
-      // 3. Command Pi to start enrollment
       await addDoc(collection(db, "kiosk_commands"), {
         type: "ENROLL", 
         studentId: docRef.id, 
@@ -271,11 +270,7 @@ function KioskContent() {
       setView("enrollment-step");
     } catch (e: any) { 
       console.error("Registration Error:", e);
-      toast({ 
-        variant: "destructive", 
-        title: "Registration Failed", 
-        description: e.message || "Database Error." 
-      }); 
+      toast({ variant: "destructive", title: "Registration Failed", description: e.message || "Database Error." }); 
     }
   };
 
@@ -285,6 +280,7 @@ function KioskContent() {
         case "PLACE_FINGER": return "PLACE FINGER ON SENSOR";
         case "REMOVE_FINGER": return "REMOVE YOUR FINGER";
         case "PLACE_AGAIN": return "PLACE SAME FINGER AGAIN";
+        case "SAVING_TO_PI": return "SYNCING DATA TO PI MEMORY...";
         case "SUCCESS": return "ENROLLMENT SUCCESSFUL!";
         case "ERROR_IMAGE": return "SCAN ERROR! TRY AGAIN";
         case "MATCH_ERROR": return "FINGERS DO NOT MATCH";
@@ -296,7 +292,7 @@ function KioskContent() {
   if (isBooting) return <BootingScreen />;
 
   return (
-    <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950", view === "no-match" && "bg-rose-950")}>
+    <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950", view === "no-match" && "bg-rose-950", view === "searching" && "bg-indigo-950")}>
       
       {/* MEGA HEADER */}
       <div className="h-28 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
@@ -331,6 +327,22 @@ function KioskContent() {
           </button>
         )}
 
+        {view === "searching" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in fade-in duration-500">
+             <div className="relative">
+                <div className="absolute inset-0 bg-indigo-500/30 blur-[150px] rounded-full animate-pulse" />
+                <div className="relative bg-indigo-500/10 p-32 rounded-full border-[20px] border-indigo-500/20 shadow-2xl">
+                    <Search className="h-64 w-64 text-indigo-400 animate-pulse" />
+                    <div className="absolute top-0 left-0 w-full h-full border-[10px] border-indigo-500/40 rounded-full animate-ping" />
+                </div>
+            </div>
+            <div className="space-y-8">
+                <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Searching...</h1>
+                <p className="text-indigo-300 font-mono text-3xl tracking-[0.2em] uppercase font-black">Matching with Local Database</p>
+            </div>
+          </div>
+        )}
+
         {view === "pairing" && (
           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-12 p-8">
             <div className="relative">
@@ -345,7 +357,6 @@ function KioskContent() {
                   Enter token in Dashboard <span className="text-primary italic font-bold">Device Center</span>
                 </p>
             </div>
-            
             <div className="bg-primary/10 border-2 border-primary/30 px-24 py-12 rounded-[4rem] shadow-2xl">
                 <span className="text-[7rem] font-black text-white tracking-[0.1em] font-mono leading-none block text-glow-white">
                     {systemStatus?.pairing_token || "------"}
@@ -404,8 +415,8 @@ function KioskContent() {
                 <div className="flex items-center gap-6">
                     <Activity className="h-12 w-12 text-indigo-400" />
                     <div className="flex flex-col">
-                        <span className="text-lg font-black text-white/30 uppercase">KERNEL</span>
-                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">v2.8.5 PRO</span>
+                        <span className="text-lg font-black text-white/30 uppercase">ENGINE</span>
+                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">HYBRID v11</span>
                     </div>
                 </div>
             </div>
@@ -472,7 +483,7 @@ function KioskContent() {
                 <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Scan Finger</h1>
                 <div className="flex items-center justify-center gap-6 bg-white/5 px-10 py-4 rounded-full border border-white/10">
                     <ShieldCheck className="h-10 w-10 text-emerald-500" />
-                    <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Bio-Identity Active</p>
+                    <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Unlimited Storage Active</p>
                 </div>
             </div>
           </div>

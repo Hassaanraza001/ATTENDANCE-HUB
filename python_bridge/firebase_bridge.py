@@ -7,9 +7,11 @@ import serial
 import adafruit_fingerprint
 from datetime import datetime
 import os
+import glob
 
 # ================= CONFIG =================
 SERVICE_ACCOUNT_KEY_FILENAME = "serviceAccountKey.json"
+TEMPLATES_DIR = "templates"
 
 COLLECTION_COMMANDS = "kiosk_commands"
 COLLECTION_STATUS = "system_status"
@@ -24,6 +26,10 @@ uart_port = None
 is_enrolling = False
 attendance_mode = False
 sensor_lock = threading.Lock()
+
+# Ensure templates directory exists
+if not os.path.exists(TEMPLATES_DIR):
+    os.makedirs(TEMPLATES_DIR)
 
 # ================= DEVICE ID =================
 def get_serial():
@@ -96,9 +102,8 @@ def heartbeat():
             
         try:
             with sensor_lock:
-                template_count = 0
-                if finger.read_templates() == adafruit_fingerprint.OK:
-                    template_count = len(finger.templates)
+                # Count files in templates directory
+                template_count = len(glob.glob(os.path.join(TEMPLATES_DIR, "*.dat")))
 
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).set({
                 "deviceId": DEVICE_SERIAL,
@@ -107,23 +112,17 @@ def heartbeat():
                 "hardware_ready": True,
                 "templates_stored": template_count
             }, merge=True)
-            print(f"Heartbeat: {template_count} templates found in sensor.")
+            print(f"Heartbeat: {template_count} templates found in SD Card.")
         except Exception as e:
             print("Heartbeat failed:", e)
         time.sleep(HEARTBEAT_INTERVAL)
 
-# ================= ENROLL LOGIC =================
-def get_free_location():
-    for i in range(1, 128):
-        if finger.load_model(i) != adafruit_fingerprint.OK:
-            return i
-    return None
-
+# ================= HYBRID ENROLL LOGIC =================
 def enroll(student_id, user_id):
     global is_enrolling
     with sensor_lock:
         is_enrolling = True
-        print(f"\n--- ENROLLMENT INITIATED: {student_id} (Institute: {user_id}) ---")
+        print(f"\n--- HYBRID ENROLLMENT INITIATED: {student_id} ---")
         
         try:
             update_ui_status("PLACE_FINGER")
@@ -142,26 +141,32 @@ def enroll(student_id, user_id):
             finger.image_2_tz(2)
 
             if finger.create_model() == adafruit_fingerprint.OK:
-                location = get_free_location()
-                if location:
-                    finger.delete_model(location)
-                    if finger.store_model(location) == adafruit_fingerprint.OK:
-                        if finger.load_model(location) == adafruit_fingerprint.OK:
-                            # Update student in institutes sub-collection
-                            student_ref = db.collection(COLLECTION_INSTITUTES).document(user_id).collection("students").document(student_id)
-                            student_ref.update({
-                                "fingerprintID": str(location),
-                                "updatedAt": firestore.SERVER_TIMESTAMP
-                            })
-                            print(f"SUCCESS: Student {student_id} saved to Slot {location}")
-                            update_ui_status("SUCCESS")
-                        else:
-                            update_ui_status("HARDWARE_ERROR")
-                    else:
-                        update_ui_status("HARDWARE_ERROR")
+                update_ui_status("SAVING_TO_PI")
+                print("Downloading template from sensor...")
+                
+                # Download template (512 bytes) from sensor's temporary buffer
+                data = finger.get_fpdata("char", 1)
+                
+                if data:
+                    # Save to Pi's SD Card
+                    file_path = os.path.join(TEMPLATES_DIR, f"{student_id}.dat")
+                    with open(file_path, "wb") as f:
+                        f.write(bytearray(data))
+                    
+                    # Update Firebase
+                    student_ref = db.collection(COLLECTION_INSTITUTES).document(user_id).collection("students").document(student_id)
+                    student_ref.update({
+                        "fingerprintID": "HYBRID_STORAGE",
+                        "updatedAt": firestore.SERVER_TIMESTAMP
+                    })
+                    
+                    print(f"SUCCESS: Template saved to {file_path}")
+                    update_ui_status("SUCCESS")
                 else:
-                    update_ui_status("NO_SPACE")
+                    print("ERROR: Could not download template from sensor")
+                    update_ui_status("HARDWARE_ERROR")
             else:
+                print("ERROR: Fingers did not match")
                 update_ui_status("MATCH_ERROR")
 
         except Exception as e:
@@ -172,10 +177,10 @@ def enroll(student_id, user_id):
         update_ui_status("IDLE")
         is_enrolling = False
 
-# ================= ATTENDANCE LOOP =================
+# ================= HYBRID ATTENDANCE ENGINE =================
 def do_attendance_loop():
     global attendance_mode
-    print("Attendance engine ready...")
+    print("Hybrid Attendance engine active...")
     
     while True:
         if not attendance_mode or is_enrolling:
@@ -185,58 +190,65 @@ def do_attendance_loop():
         with sensor_lock:
             try:
                 if finger.get_image() == adafruit_fingerprint.OK:
-                    print("Finger detected! Matching...")
-                    time.sleep(0.5)
+                    print("Finger detected! Starting software match...")
+                    db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "searching"})
                     
                     if finger.image_2_tz(1) == adafruit_fingerprint.OK:
-                        if finger.finger_search() == adafruit_fingerprint.OK:
-                            matched_slot = str(finger.finger_id)
-                            print(f"Match! Slot: {matched_slot}")
+                        # Get all stored templates
+                        template_files = glob.glob(os.path.join(TEMPLATES_DIR, "*.dat"))
+                        
+                        status_doc = db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).get()
+                        current_userId = status_doc.to_dict().get("userId") if status_doc.exists else None
 
-                            status_doc = db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).get()
-                            current_userId = status_doc.to_dict().get("userId")
+                        if not current_userId:
+                            print("Access Denied: Device not paired.")
+                            continue
 
-                            if not current_userId:
-                                print("Access Denied: Device not paired.")
-                                continue
-
-                            # Query only the paired institute's students
-                            students_ref = db.collection(COLLECTION_INSTITUTES).document(current_userId).collection("students")
-                            query = students_ref.where("fingerprintID", "==", matched_slot).limit(1).stream()
+                        found_match = False
+                        for file_path in template_files:
+                            student_id = os.path.basename(file_path).replace(".dat", "")
                             
-                            found = False
-                            for s_doc in query:
-                                found = True
-                                student_data = s_doc.to_dict()
-                                student_name = student_data.get('name', 'Unknown')
-                                today = datetime.now().strftime("%Y-%m-%d")
-                                attendance_map = student_data.get("attendance", {})
-                                attendance_map[today] = "present"
-                                
-                                s_doc.reference.update({
-                                    "attendance": attendance_map,
-                                    "last_attendance": firestore.SERVER_TIMESTAMP
-                                })
-                                
-                                print(f"✅ Attendance Marked: {student_name}")
-                                db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
-                                    "scan_status": "success",
-                                    "last_student_name": student_name,
-                                    "last_scan": firestore.SERVER_TIMESTAMP
-                                })
-                                time.sleep(4)
-                                db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
-                                break
+                            # Upload template to Buffer 2
+                            with open(file_path, "rb") as f:
+                                template_data = f.read()
                             
-                            if not found:
-                                print(f"SECURITY: Slot {matched_slot} belongs to another institute.")
-                                db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "no_match"})
-                                time.sleep(2)
-                                db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
-                        else:
+                            finger.send_fpdata(list(template_data), "char", 2)
+                            
+                            # Compare Buffer 1 and Buffer 2
+                            if finger.compare_templates() >= 40: # Threshold 40
+                                print(f"✅ MATCH FOUND! Student ID: {student_id}")
+                                found_match = True
+                                
+                                # Mark attendance in Firestore
+                                student_ref = db.collection(COLLECTION_INSTITUTES).document(current_userId).collection("students").document(student_id)
+                                s_doc = student_ref.get()
+                                
+                                if s_doc.exists:
+                                    student_data = s_doc.to_dict()
+                                    student_name = student_data.get('name', 'Unknown')
+                                    today = datetime.now().strftime("%Y-%m-%d")
+                                    attendance_map = student_data.get("attendance", {})
+                                    attendance_map[today] = "present"
+                                    
+                                    student_ref.update({
+                                        "attendance": attendance_map,
+                                        "last_attendance": firestore.SERVER_TIMESTAMP
+                                    })
+                                    
+                                    db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
+                                        "scan_status": "success",
+                                        "last_student_name": student_name,
+                                        "last_scan": firestore.SERVER_TIMESTAMP
+                                    })
+                                    time.sleep(4)
+                                    break
+                        
+                        if not found_match:
+                            print("No match found in local database.")
                             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "no_match"})
                             time.sleep(2)
-                            db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
+                        
+                        db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
             except Exception as e:
                 print("Hardware loop error:", e)
                 time.sleep(1)
@@ -264,23 +276,30 @@ def listen_commands():
                     elif cmd_type == "END_ATTENDANCE":
                         attendance_mode = False
                         update_ui_status("IDLE")
+                    elif cmd_type == "DELETE_TEMPLATE":
+                        student_id = data.get("studentId")
+                        file_path = os.path.join(TEMPLATES_DIR, f"{student_id}.dat")
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                            print(f"DELETED: {file_path}")
                     elif cmd_type == "RESET_SENSOR":
                         with sensor_lock:
-                            print("!!! EXECUTING FACTORY RESET !!!")
+                            print("!!! WIPING LOCAL DATABASE !!!")
+                            files = glob.glob(os.path.join(TEMPLATES_DIR, "*.dat"))
+                            for f in files: os.remove(f)
                             finger.empty_library()
-                            time.sleep(2)
                             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
                                 "templates_stored": 0,
                                 "enrollment_status": "IDLE"
                             })
-                            print(">>> SENSOR WIPED CLEAN")
+                            print(">>> DATABASE WIPED CLEAN")
 
                     change.document.reference.update({"status": "done"})
 
     db.collection(COLLECTION_COMMANDS).where("status", "==", "pending").on_snapshot(on_snapshot)
 
 if __name__ == "__main__":
-    print("\n--- Attendance HUB BioSync v10.0 (Isolated) ---")
+    print("\n--- Attendance HUB BioSync v11.0 (UNLIMITED HYBRID) ---")
     if setup_firebase():
         if setup_hardware():
             update_ui_status("IDLE")

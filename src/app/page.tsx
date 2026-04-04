@@ -147,7 +147,7 @@ export default function DashboardPage() {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  // STATES - All hooks at the top in correct order
+  // STATES
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -221,8 +221,6 @@ export default function DashboardPage() {
           if (snap.exists()) {
             setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
           }
-        }, (err) => {
-          console.log("Profile Sync Muted:", err.message);
         });
 
         // Live Device Status Sync
@@ -237,8 +235,6 @@ export default function DashboardPage() {
           } else {
             setDeviceStatus(null);
           }
-        }, (err) => {
-          console.log("Status Sync Muted:", err.message);
         });
 
         // Live Students Sync
@@ -248,7 +244,7 @@ export default function DashboardPage() {
           setAllStudents(studentsData);
           setIsLoading(false); 
         }, (err) => {
-          console.log("Students Sync Muted:", err.message);
+          console.error("Students sync error:", err);
           setIsLoading(false);
         });
 
@@ -339,9 +335,9 @@ export default function DashboardPage() {
         status: "pending", 
         createdAt: serverTimestamp()
       });
-      toast({ title: "Reset Command Sent", description: "The sensor memory is being cleared..." });
+      toast({ title: "Reset Command Sent", description: "The local template database is being wiped..." });
     } catch (e) {
-      toast({ variant: "destructive", title: "Reset Failed", description: "Check your internet connection." });
+      toast({ variant: "destructive", title: "Reset Failed" });
     }
   };
 
@@ -357,16 +353,26 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSendNotifications = () => {
-    if (!deviceStatus?.deviceId || !currentUser) return;
-    addDoc(collection(db, "kiosk_commands"), {
-      type: "SEND_NOTIFICATIONS",
-      deviceId: deviceStatus.deviceId,
-      userId: currentUser.uid,
-      status: "pending",
-      createdAt: serverTimestamp()
-    });
-    toast({ title: "Notifications request sent to device" });
+  const handleConfirmDelete = async () => {
+    if (!studentToDelete || !currentUser) return;
+    try {
+        // 1. Delete from Firestore
+        await deleteStudent(currentUser.uid, studentToDelete.id);
+        // 2. Command Pi to delete from local storage
+        if (deviceStatus?.deviceId) {
+            await addDoc(collection(db, "kiosk_commands"), {
+                type: "DELETE_TEMPLATE",
+                studentId: studentToDelete.id,
+                deviceId: deviceStatus.deviceId,
+                status: "pending",
+                createdAt: serverTimestamp()
+            });
+        }
+        setStudentToDelete(null);
+        toast({ title: "Student Record Purged" });
+    } catch (e) {
+        toast({ variant: "destructive", title: "Deletion Failed" });
+    }
   };
 
   const isDeviceOnline = deviceStatus && (new Date().getTime() - (deviceStatus.last_online?.toDate().getTime() || 0) < 60000);
@@ -420,7 +426,7 @@ export default function DashboardPage() {
              <div className="flex-1 flex items-center gap-3 bg-black/40 px-4 py-3 rounded-xl border border-white/5 overflow-hidden">
                 <Terminal className="h-4 w-4 text-primary animate-pulse shrink-0" />
                 <div className="text-[11px] font-mono text-primary/60 truncate whitespace-nowrap">
-                   [SYSTEM_LOG]: Initializing BioSync OS Kernel... Database Stream ACTIVE... {lastMarkedStudent ? `Last Sync: ${lastMarkedStudent} marked present` : ''}
+                   [SYSTEM_LOG]: Hybrid Engine Active... Matching Local Templates... {lastMarkedStudent ? `Last Sync: ${lastMarkedStudent} marked present` : ''}
                 </div>
              </div>
           </div>
@@ -449,7 +455,7 @@ export default function DashboardPage() {
             <div className="space-y-4 max-w-xl">
               <div className="flex items-center gap-3 text-primary bg-primary/10 w-fit px-4 py-1 rounded-full border border-primary/20">
                 <Sparkles className="h-4 w-4 animate-pulse" />
-                <span className="text-[9px] font-black uppercase tracking-[0.5em]">Command Hub v2.85 PRO</span>
+                <span className="text-[9px] font-black uppercase tracking-[0.5em]">Command Hub v11 HYBRID</span>
               </div>
               <h2 className="text-7xl font-black italic tracking-tighter uppercase leading-none text-glow-white">
                 {userProfile?.instituteName?.split(' ')[0] || "COMMAND"} <span className="text-primary">{userProfile?.instituteName?.split(' ').slice(1).join(' ') || "CENTER"}</span>
@@ -482,8 +488,8 @@ export default function DashboardPage() {
                   >
                     <BrainCircuit className="h-5 w-5 text-primary group-hover:text-white transition-colors" />
                     <div className="flex flex-col items-start">
-                      <span className="text-[9px] font-black text-white/40 uppercase tracking-widest leading-none mb-1 group-hover:text-white/60">LOCAL ENGINE</span>
-                      <span className="text-sm font-black italic uppercase tracking-tighter text-white">Smart Analysis</span>
+                      <span className="text-[9px] font-black text-white/40 uppercase tracking-widest leading-none mb-1 group-hover:text-white/60">HYBRID ENGINE</span>
+                      <span className="text-sm font-black italic uppercase tracking-tighter text-white">Unlimited Storage</span>
                     </div>
                   </Button>
                </div>
@@ -576,8 +582,8 @@ export default function DashboardPage() {
                 <h3 className="text-4xl font-black italic tracking-tighter uppercase leading-none">Device <span className="text-primary">Center</span></h3>
                 <div className="space-y-4">
                   <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
-                      <span className="text-[10px] font-black text-muted-foreground uppercase">THERMAL</span>
-                      <span className="text-sm font-black text-white">{isDeviceOnline ? `${deviceStatus?.cpu_temp?.toFixed(1) || '38'}°C` : "--"}</span>
+                      <span className="text-[10px] font-black text-muted-foreground uppercase">STORAGE</span>
+                      <span className="text-sm font-black text-white">{isDeviceOnline ? `${deviceStatus?.templates_stored || 0} Files` : "--"}</span>
                   </div>
                 </div>
                 <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-black italic uppercase tracking-widest rounded-2xl py-8 shadow-xl">Open OS Terminal</Button>
@@ -619,7 +625,7 @@ export default function DashboardPage() {
                 onEnroll={setStudentToEnroll}
                 isLoading={false}
                 selectedDate={selectedDate}
-                onSendNotifications={handleSendNotifications}
+                onSendNotifications={() => {}}
                 attendanceTaken={appState === "attending"}
                 isPending={isPending}
               />
@@ -660,7 +666,7 @@ export default function DashboardPage() {
       />
       <AttendanceCalendarDialog student={selectedStudentForCalendar} isOpen={!!selectedStudentForCalendar} onOpenChange={() => setSelectedStudentForCalendar(null)} />
       <AttendanceReportDialog isOpen={isReportDialogOpen} onOpenChange={setIsReportDialogOpen} students={allStudents} classNames={classNames} />
-      <DeleteStudentAlert isOpen={!!studentToDelete} onOpenChange={() => setStudentToDelete(null)} onConfirm={() => { if(studentToDelete && currentUser) deleteStudent(currentUser.uid, studentToDelete.id); setStudentToDelete(null); }} studentName={studentToDelete?.name} isDeleting={isPending} />
+      <DeleteStudentAlert isOpen={!!studentToDelete} onOpenChange={() => setStudentToDelete(null)} onConfirm={handleConfirmDelete} studentName={studentToDelete?.name} isDeleting={isPending} />
       <ManageFacultyDialog isOpen={isFacultyDialogOpen} onOpenChange={setIsFacultyDialogOpen} faculties={faculties} onRefresh={() => currentUser && fetchFaculty(currentUser.uid)} userId={currentUser?.uid || ''} />
       <DeviceCenterDialog isOpen={isDeviceCenterOpen} onOpenChange={setIsDeviceCenterOpen} userId={currentUser?.uid || ''} />
       <HistoryAuditDialog isOpen={isHistoryAuditOpen} onOpenChange={setIsHistoryAuditOpen} students={allStudents} classNames={classNames} onViewProfile={setSelectedStudentForCalendar} />
