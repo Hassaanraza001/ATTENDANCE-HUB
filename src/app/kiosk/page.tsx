@@ -21,7 +21,8 @@ import {
   Link as LinkIcon,
   AlertTriangle,
   XCircle,
-  Search
+  Search,
+  BookOpen
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,7 @@ import {
   setDoc,
   getCountFromServer,
   updateDoc,
-  getDoc
+  getDocs
 } from "firebase/firestore";
 
 const KEYBOARD_LAYOUT = [
@@ -90,7 +91,7 @@ function KioskContent() {
   const urlDeviceId = searchParams.get("deviceId");
   
   const [isBooting, setIsBooting] = useState(true);
-  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match" | "searching">("processing");
+  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match" | "searching" | "class-selection">("processing");
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -98,6 +99,7 @@ function KioskContent() {
   const [lastStudentName, setLastStudentName] = useState<string | null>(null);
   const [studentCount, setStudentCount] = useState(0);
   const [isCaps, setIsCaps] = useState(true);
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
   const { toast } = useToast();
 
   const [regData, setRegData] = useState({ name: "", rollNo: "", class: "", phone: "" });
@@ -131,11 +133,15 @@ function KioskContent() {
           if (view === "pairing" || view === "processing") setView("home");
           
           try {
-            const qCount = collection(db, "institutes", data.userId, "students");
-            const countSnap = await getCountFromServer(qCount);
+            const qStudents = collection(db, "institutes", data.userId, "students");
+            const countSnap = await getCountFromServer(qStudents);
             setStudentCount(countSnap.data().count);
+
+            const studentDocs = await getDocs(qStudents);
+            const classes = Array.from(new Set(studentDocs.docs.map(d => d.data().className).filter(c => !!c)));
+            setAvailableClasses(classes as string[]);
           } catch (e) {
-            console.error("Student count error:", e);
+            console.error("Data fetch error:", e);
           }
         } else {
           setView("pairing");
@@ -145,7 +151,6 @@ function KioskContent() {
             setTimeout(() => setView("home"), 2000);
         }
 
-        // Attendance Status Handling
         if (view === "attendance" || view === "searching") {
             if (data.scan_status === "searching") {
                 setView("searching");
@@ -155,11 +160,11 @@ function KioskContent() {
                 setTimeout(() => setView("home"), 3500);
             } else if (data.scan_status === "no_match") {
                 setView("no-match");
-                setTimeout(() => setView("attendance"), 2000);
+                setTimeout(() => setView("attendance"), 3000);
             }
         }
         
-        if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR") {
+        if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR" || data.enrollment_status === "ERROR_IMAGE") {
             setTimeout(() => {
                 updateDoc(statusRef, { enrollment_status: "IDLE" }).catch(e => console.error("Status reset error:", e));
                 setView("registration");
@@ -184,7 +189,7 @@ function KioskContent() {
     return () => unsubscribeStatus();
   }, [urlDeviceId, view]);
 
-  const handleStartAttendance = async () => {
+  const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
     try {
         const db = getDb();
@@ -192,6 +197,7 @@ function KioskContent() {
             type: "START_ATTENDANCE",
             deviceId: currentDeviceId,
             userId: currentUserId,
+            className: className,
             status: "pending",
             createdAt: serverTimestamp()
         });
@@ -203,7 +209,7 @@ function KioskContent() {
 
   const handleBack = async () => {
     const db = getDb();
-    if ((view === "attendance" || view === "searching") && currentDeviceId) {
+    if ((view === "attendance" || view === "searching" || view === "no-match") && currentDeviceId) {
         await addDoc(collection(db, "kiosk_commands"), {
             type: "END_ATTENDANCE",
             deviceId: currentDeviceId,
@@ -212,8 +218,9 @@ function KioskContent() {
         });
     }
     
-    if (view === "enrollment-step") setView("registration");
-    else if (view === "registration" || view === "attendance" || view === "searching") { setView("home"); setActiveInput(null); }
+    if (view === "class-selection") setView("home");
+    else if (view === "enrollment-step") setView("registration");
+    else if (view === "registration" || view === "attendance" || view === "searching" || view === "no-match") { setView("home"); setActiveInput(null); }
     else if (activeInput) setActiveInput(null);
   };
 
@@ -250,7 +257,7 @@ function KioskContent() {
         rollNo: Number(regData.rollNo), 
         className: regData.class || "10A", 
         phone: regData.phone ? `+91${regData.phone}` : "",
-        fingerprintID: "NOT_ENROLLED", 
+        fingerprintID: "HYBRID_STORAGE", 
         attendance: {}, 
         userId: currentUserId, 
         createdAt: serverTimestamp(),
@@ -317,7 +324,7 @@ function KioskContent() {
 
       <div className="flex-1 relative flex flex-col items-center justify-center">
         
-        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success" && view !== "no-match") && (
+        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success") && (
           <button 
             onClick={handleBack}
             className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl"
@@ -325,6 +332,33 @@ function KioskContent() {
             <ChevronLeft className="h-10 w-10" />
             <span className="text-xl font-black uppercase tracking-widest">BACK</span>
           </button>
+        )}
+
+        {view === "class-selection" && (
+          <div className="w-full max-w-[1400px] flex flex-col items-center gap-16 animate-in fade-in duration-500">
+            <div className="text-center space-y-4">
+                <h2 className="text-7xl font-black text-white italic uppercase tracking-tighter">Select Class</h2>
+                <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Syncing Class Rosters</p>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8 w-full px-10">
+                {availableClasses.length > 0 ? (
+                    availableClasses.map((className) => (
+                        <button 
+                            key={className}
+                            onClick={() => handleStartAttendance(className)}
+                            className="h-40 bg-slate-900/60 border-4 border-white/5 hover:border-primary rounded-[2.5rem] flex flex-col items-center justify-center gap-2 transition-all active:scale-95 shadow-2xl group"
+                        >
+                            <BookOpen className="h-10 w-10 text-primary/40 group-hover:text-primary transition-colors" />
+                            <span className="text-5xl font-black text-white italic uppercase tracking-tighter">{className}</span>
+                        </button>
+                    ))
+                ) : (
+                    <div className="col-span-full py-20 text-center text-slate-500 font-black uppercase text-3xl italic tracking-widest bg-white/5 rounded-[3rem] border border-dashed border-white/10">
+                        No Classes Found In Roster
+                    </div>
+                )}
+            </div>
+          </div>
         )}
 
         {view === "searching" && (
@@ -338,7 +372,7 @@ function KioskContent() {
             </div>
             <div className="space-y-8">
                 <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Searching...</h1>
-                <p className="text-indigo-300 font-mono text-3xl tracking-[0.2em] uppercase font-black">Matching with Local Database</p>
+                <p className="text-indigo-300 font-mono text-3xl tracking-[0.2em] uppercase font-black">Matching with Class Roster</p>
             </div>
           </div>
         )}
@@ -378,7 +412,7 @@ function KioskContent() {
 
             <div className="flex gap-12 w-full max-w-[1400px]">
                 <button 
-                    onClick={handleStartAttendance} 
+                    onClick={() => setView("class-selection")} 
                     className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl"
                 >
                     <div className="p-8 bg-primary/10 rounded-full border border-primary/20">
@@ -416,7 +450,7 @@ function KioskContent() {
                     <Activity className="h-12 w-12 text-indigo-400" />
                     <div className="flex flex-col">
                         <span className="text-lg font-black text-white/30 uppercase">ENGINE</span>
-                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">HYBRID v11</span>
+                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">HYBRID v12.5</span>
                     </div>
                 </div>
             </div>
@@ -483,7 +517,7 @@ function KioskContent() {
                 <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Scan Finger</h1>
                 <div className="flex items-center justify-center gap-6 bg-white/5 px-10 py-4 rounded-full border border-white/10">
                     <ShieldCheck className="h-10 w-10 text-emerald-500" />
-                    <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Unlimited Storage Active</p>
+                    <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Unlimited Class Sync Active</p>
                 </div>
             </div>
           </div>
@@ -508,7 +542,10 @@ function KioskContent() {
             </div>
             <div className="space-y-8">
                 <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase text-glow-rose">NO MATCH</h2>
-                <p className="text-4xl text-rose-300 font-black uppercase tracking-widest">ID NOT FOUND IN DATABASE</p>
+                <div className="space-y-4">
+                    <p className="text-4xl text-rose-300 font-black uppercase tracking-widest">ID NOT FOUND IN CLASS</p>
+                    <p className="text-xl text-slate-500 font-bold uppercase tracking-widest">Ensure you are scanning for the correct class.</p>
+                </div>
             </div>
           </div>
         )}
