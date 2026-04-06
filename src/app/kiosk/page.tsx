@@ -145,7 +145,7 @@ function KioskContent() {
 
   // 3. UI LOGIC STATE MACHINE
   useEffect(() => {
-    if (!systemStatus) return;
+    if (!systemStatus || !currentDeviceId) return;
 
     if (systemStatus.userId && systemStatus.userId !== currentUserId) {
         setCurrentUserId(systemStatus.userId);
@@ -171,8 +171,25 @@ function KioskContent() {
         } else if (systemStatus.scan_status === "success") {
             setLastStudentName(systemStatus.last_student_name || "Unknown Student");
             setView("success");
-            // Automatically return to home after success
-            const timer = setTimeout(() => setView("home"), 3500);
+            
+            // AUTOMATIC REDIRECT TO HOME AFTER 3 SECONDS
+            const timer = setTimeout(async () => {
+                const db = getDb();
+                // Send END_ATTENDANCE command to Pi
+                await addDoc(collection(db, "kiosk_commands"), {
+                    type: "END_ATTENDANCE",
+                    deviceId: currentDeviceId,
+                    status: "pending",
+                    createdAt: serverTimestamp()
+                });
+                // Reset status in DB to kill ghost triggers
+                await updateDoc(doc(db, "system_status", currentDeviceId), {
+                    scan_status: "idle",
+                    last_student_name: ""
+                });
+                setView("home");
+            }, 3000);
+            
             return () => clearTimeout(timer);
         } else if (systemStatus.scan_status === "no_match") {
             setView("no-match");
@@ -198,16 +215,14 @@ function KioskContent() {
     
     const unsubscribeData = onSnapshot(qStudents, (snap) => {
         const docs = snap.docs;
-        if (docs.length !== studentCount) {
-            setStudentCount(docs.length);
-        }
+        setStudentCount(docs.length);
         
         const classes = Array.from(new Set(docs.map(d => d.data().className).filter(c => !!c))).sort() as string[];
         setAvailableClasses(classes);
     });
 
     return () => unsubscribeData();
-  }, [currentUserId, studentCount]);
+  }, [currentUserId]);
 
   const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
@@ -237,7 +252,7 @@ function KioskContent() {
 
   const handleBack = async () => {
     const db = getDb();
-    if ((view === "attendance" || view === "searching" || view === "no-match") && currentDeviceId) {
+    if ((view === "attendance" || view === "searching" || view === "no-match" || view === "success") && currentDeviceId) {
         await addDoc(collection(db, "kiosk_commands"), {
             type: "END_ATTENDANCE",
             deviceId: currentDeviceId,
@@ -253,7 +268,7 @@ function KioskContent() {
     
     if (view === "class-selection") setView("home");
     else if (view === "enrollment-step") setView("registration");
-    else if (view === "registration" || view === "attendance" || view === "searching" || view === "no-match") { setView("home"); setActiveInput(null); }
+    else if (view === "registration" || view === "attendance" || view === "searching" || view === "no-match" || view === "success") { setView("home"); setActiveInput(null); }
     else if (activeInput) setActiveInput(null);
   };
 
@@ -356,7 +371,7 @@ function KioskContent() {
 
       <div className="flex-1 relative flex flex-col items-center justify-center">
         
-        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "success") && (
+        {(view !== "home" && view !== "processing" && view !== "pairing") && (
           <button 
             onClick={handleBack}
             className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl"
