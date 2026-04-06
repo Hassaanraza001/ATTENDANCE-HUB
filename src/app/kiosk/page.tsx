@@ -116,7 +116,7 @@ function KioskContent() {
     setCurrentDeviceId(serial);
   }, [urlDeviceId]);
 
-  // 2. STABLE STATUS LISTENER (No state dependencies in array)
+  // 2. STABLE STATUS LISTENER
   useEffect(() => {
     if (!currentDeviceId) return;
     const db = getDb();
@@ -143,11 +143,10 @@ function KioskContent() {
     return () => unsubscribeStatus();
   }, [currentDeviceId]);
 
-  // 3. UI LOGIC STATE MACHINE (Reacts to systemStatus changes)
+  // 3. UI LOGIC STATE MACHINE
   useEffect(() => {
     if (!systemStatus) return;
 
-    // Handle User Pairing
     if (systemStatus.userId && systemStatus.userId !== currentUserId) {
         setCurrentUserId(systemStatus.userId);
     }
@@ -157,7 +156,6 @@ function KioskContent() {
         return;
     }
 
-    // Handle View Transitions
     if (view === "pairing" || view === "processing") {
         setView("home");
     }
@@ -166,16 +164,20 @@ function KioskContent() {
         setTimeout(() => setView("home"), 2000);
     }
 
+    // React to success status only when in relevant views
     if (view === "attendance" || view === "searching") {
         if (systemStatus.scan_status === "searching") {
             setView("searching");
         } else if (systemStatus.scan_status === "success") {
             setLastStudentName(systemStatus.last_student_name || "Unknown Student");
             setView("success");
-            setTimeout(() => setView("home"), 3500);
+            // Automatically return to home after success
+            const timer = setTimeout(() => setView("home"), 3500);
+            return () => clearTimeout(timer);
         } else if (systemStatus.scan_status === "no_match") {
             setView("no-match");
-            setTimeout(() => setView("attendance"), 3000);
+            const timer = setTimeout(() => setView("attendance"), 3000);
+            return () => clearTimeout(timer);
         }
     }
     
@@ -211,6 +213,13 @@ function KioskContent() {
     if (!currentDeviceId || !currentUserId) return;
     try {
         const db = getDb();
+        // Step 1: Explicitly clear the status in DB to kill ghosts
+        await updateDoc(doc(db, "system_status", currentDeviceId), {
+            scan_status: "idle",
+            last_student_name: ""
+        });
+
+        // Step 2: Send the command
         await addDoc(collection(db, "kiosk_commands"), {
             type: "START_ATTENDANCE",
             deviceId: currentDeviceId,
@@ -219,6 +228,7 @@ function KioskContent() {
             status: "pending",
             createdAt: serverTimestamp()
         });
+        
         setView("attendance");
     } catch (e) {
         toast({ variant: "destructive", title: "Error", description: "Failed to trigger attendance." });
@@ -233,6 +243,11 @@ function KioskContent() {
             deviceId: currentDeviceId,
             status: "pending",
             createdAt: serverTimestamp()
+        });
+        // Clear status on back too
+        await updateDoc(doc(db, "system_status", currentDeviceId), {
+            scan_status: "idle",
+            last_student_name: ""
         });
     }
     
