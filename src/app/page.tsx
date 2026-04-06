@@ -178,88 +178,85 @@ export default function DashboardPage() {
   const auth = getAuthInstance();
   const db = getDb();
 
-  // CALLBACKS
-  const fetchFaculty = useCallback(async (userId: string) => {
-    try {
-      const facultiesFromDB = await getFaculties(userId);
-      setFaculties(facultiesFromDB);
-    } catch (error) {
-      console.error("Error fetching faculty:", error);
-    }
-  }, []);
-
-  const initProfile = useCallback(async (userId: string) => {
-    try {
-      const docRef = doc(db, "institutes", userId);
-      const docSnap = await getDoc(docRef);
-      if (!docSnap.exists()) {
-        const initialProfile = {
-          displayName: "Admin User",
-          instituteName: "Command Center",
-          phoneNumber: "",
-          email: auth.currentUser?.email || "",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        };
-        await setDoc(docRef, initialProfile);
-      }
-    } catch (error) {
-      console.error("Profile Init Error:", error);
-    }
-  }, [auth, db]);
-
-  // MAIN AUTH & DATA SYNC EFFECT
+  // 1. STABLE AUTH LISTENER
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+    const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
         setCurrentUser(user);
-        await initProfile(user.uid);
-        await fetchFaculty(user.uid);
-        
-        // Live Profile Sync
-        const profileUnsub = onSnapshot(doc(db, "institutes", user.uid), (snap) => {
-          if (snap.exists()) {
-            setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
-          }
-        });
-
-        // Live Device Status Sync
-        const qStatus = query(collection(db, "system_status"), where("userId", "==", user.uid), limit(1));
-        const statusUnsub = onSnapshot(qStatus, (snap) => {
-          if (!snap.empty) {
-            const data = snap.docs[0].data();
-            setDeviceStatus(data);
-            if (data.scan_status === "success") {
-                setLastMarkedStudent(data.last_student_name);
-            }
-          } else {
-            setDeviceStatus(null);
-          }
-        });
-
-        // Live Students Sync
-        const qStudents = collection(db, "institutes", user.uid, "students");
-        const unsubscribeStudents = onSnapshot(qStudents, (snapshot) => {
-          const studentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
-          setAllStudents(studentsData);
-          setIsLoading(false); 
-        }, (err) => {
-          console.error("Students sync error:", err);
-          setIsLoading(false);
-        });
-
-        return () => {
-          unsubscribeStudents();
-          statusUnsub();
-          profileUnsub();
-        };
       } else {
         setIsLoading(false);
         router.push("/login");
       }
     });
-    return () => unsubscribeAuth();
-  }, [router, auth, db, fetchFaculty, initProfile]);
+    return unsub;
+  }, [auth, router]);
+
+  // 2. STABLE DATA LOADER (Runs once on user switch)
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const initData = async () => {
+        try {
+            // Profile Init
+            const docRef = doc(db, "institutes", currentUser.uid);
+            const docSnap = await getDoc(docRef);
+            if (!docSnap.exists()) {
+                await setDoc(docRef, {
+                    displayName: "Admin User",
+                    instituteName: "Command Center",
+                    phoneNumber: "",
+                    email: currentUser.email || "",
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp()
+                });
+            }
+            // Faculty Load
+            const facultiesFromDB = await getFaculties(currentUser.uid);
+            setFaculties(facultiesFromDB);
+        } catch (e) {
+            console.error("Init Error:", e);
+        }
+    };
+    initData();
+  }, [currentUser, db]);
+
+  // 3. STABLE PROFILE SYNC
+  useEffect(() => {
+    if (!currentUser) return;
+    return onSnapshot(doc(db, "institutes", currentUser.uid), (snap) => {
+      if (snap.exists()) {
+        setUserProfile({ id: snap.id, ...snap.data() } as UserProfile);
+      }
+    });
+  }, [currentUser?.uid, db]);
+
+  // 4. STABLE STATUS SYNC
+  useEffect(() => {
+    if (!currentUser) return;
+    const qStatus = query(collection(db, "system_status"), where("userId", "==", currentUser.uid), limit(1));
+    return onSnapshot(qStatus, (snap) => {
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setDeviceStatus(data);
+        if (data.scan_status === "success") {
+            setLastMarkedStudent(data.last_student_name);
+        }
+      } else {
+        setDeviceStatus(null);
+      }
+    });
+  }, [currentUser?.uid, db]);
+
+  // 5. STABLE STUDENTS SYNC
+  useEffect(() => {
+    if (!currentUser) return;
+    const qStudents = collection(db, "institutes", currentUser.uid, "students");
+    return onSnapshot(qStudents, (snapshot) => {
+      const studentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
+      setAllStudents(studentsData);
+      setIsLoading(false); 
+    });
+  }, [currentUser?.uid, db]);
 
   // MEMOIZED VALUES
   const students = useMemo(() => {
@@ -356,9 +353,7 @@ export default function DashboardPage() {
   const handleConfirmDelete = async () => {
     if (!studentToDelete || !currentUser) return;
     try {
-        // 1. Delete from Firestore
         await deleteStudent(currentUser.uid, studentToDelete.id);
-        // 2. Command Pi to delete from local storage
         if (deviceStatus?.deviceId) {
             await addDoc(collection(db, "kiosk_commands"), {
                 type: "DELETE_TEMPLATE",
@@ -670,7 +665,7 @@ export default function DashboardPage() {
       <ManageFacultyDialog isOpen={isFacultyDialogOpen} onOpenChange={setIsFacultyDialogOpen} faculties={faculties} onRefresh={() => currentUser && fetchFaculty(currentUser.uid)} userId={currentUser?.uid || ''} />
       <DeviceCenterDialog isOpen={isDeviceCenterOpen} onOpenChange={setIsDeviceCenterOpen} userId={currentUser?.uid || ''} />
       <HistoryAuditDialog isOpen={isHistoryAuditOpen} onOpenChange={setIsHistoryAuditOpen} students={allStudents} classNames={classNames} onViewProfile={setSelectedStudentForCalendar} />
-      <ProfileSettingsDialog isOpen={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen} profile={userProfile} onRefresh={() => currentUser && initProfile(currentUser.uid)} />
+      <ProfileSettingsDialog isOpen={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen} profile={userProfile} onRefresh={() => currentUser && initData(currentUser.uid)} />
       
       <style jsx global>{`
         .text-glow-emerald { text-shadow: 0 0 25px rgba(16,185,129,0.5); }

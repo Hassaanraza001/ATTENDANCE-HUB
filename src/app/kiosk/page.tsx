@@ -11,18 +11,16 @@ import {
   UserPlus, 
   Loader2,
   CalendarCheck,
-  Cpu,
   Activity,
   Users,
   Database,
   ChevronLeft,
   ShieldCheck,
-  Zap,
+  Search,
+  BookOpen,
   Link as LinkIcon,
   AlertTriangle,
-  XCircle,
-  Search,
-  BookOpen
+  XCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -34,12 +32,8 @@ import {
   serverTimestamp, 
   addDoc,
   onSnapshot,
-  query,
-  where,
   setDoc,
-  getCountFromServer,
-  updateDoc,
-  getDocs
+  updateDoc
 } from "firebase/firestore";
 
 const KEYBOARD_LAYOUT = [
@@ -76,7 +70,7 @@ const BootingScreen = () => {
       <h1 className="text-7xl font-black text-white italic tracking-tighter uppercase mb-4 text-glow-white">
         BioSync <span className="text-primary">Box</span>
       </h1>
-      <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold mb-12">OS KERNEL v2.8.5.PRO</p>
+      <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold mb-12">OS KERNEL v12.7.PRO</p>
       <div className="w-96 space-y-4">
         <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
           <div className="h-full bg-primary shadow-[0_0_20px_rgba(59,130,246,1)] transition-all duration-200 rounded-full" style={{ width: `${progress}%` }} />
@@ -111,8 +105,8 @@ function KioskContent() {
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
   }, []);
 
+  // 1. STABLE DEVICE ID
   useEffect(() => {
-    const db = getDb();
     let serial = urlDeviceId;
     if (!serial && typeof window !== 'undefined') serial = localStorage.getItem("pi_serial_mock");
     if (!serial) {
@@ -120,59 +114,21 @@ function KioskContent() {
         if (typeof window !== 'undefined') localStorage.setItem("pi_serial_mock", serial);
     }
     setCurrentDeviceId(serial);
+  }, [urlDeviceId]);
 
-    const statusRef = doc(db, "system_status", serial);
+  // 2. STABLE STATUS LISTENER (No state dependencies in array)
+  useEffect(() => {
+    if (!currentDeviceId) return;
+    const db = getDb();
+    const statusRef = doc(db, "system_status", currentDeviceId);
     
-    const unsubscribeStatus = onSnapshot(statusRef, async (snap) => {
+    const unsubscribeStatus = onSnapshot(statusRef, (snap) => {
       if (snap.exists()) {
         const data = snap.data();
         setSystemStatus(data);
-        setCurrentUserId(data.userId);
-        
-        if (data.userId) {
-          if (view === "pairing" || view === "processing") setView("home");
-          
-          try {
-            const qStudents = collection(db, "institutes", data.userId, "students");
-            const countSnap = await getCountFromServer(qStudents);
-            setStudentCount(countSnap.data().count);
-
-            const studentDocs = await getDocs(qStudents);
-            const classes = Array.from(new Set(studentDocs.docs.map(d => d.data().className).filter(c => !!c)));
-            setAvailableClasses(classes as string[]);
-          } catch (e) {
-            console.error("Data fetch error:", e);
-          }
-        } else {
-          setView("pairing");
-        }
-
-        if (data.enrollment_status === "SUCCESS") {
-            setTimeout(() => setView("home"), 2000);
-        }
-
-        if (view === "attendance" || view === "searching") {
-            if (data.scan_status === "searching") {
-                setView("searching");
-            } else if (data.scan_status === "success") {
-                setLastStudentName(data.last_student_name || "Unknown Student");
-                setView("success");
-                setTimeout(() => setView("home"), 3500);
-            } else if (data.scan_status === "no_match") {
-                setView("no-match");
-                setTimeout(() => setView("attendance"), 3000);
-            }
-        }
-        
-        if (data.enrollment_status === "HARDWARE_ERROR" || data.enrollment_status === "MATCH_ERROR" || data.enrollment_status === "ERROR_IMAGE") {
-            setTimeout(() => {
-                updateDoc(statusRef, { enrollment_status: "IDLE" }).catch(e => console.error("Status reset error:", e));
-                setView("registration");
-            }, 4000);
-        }
-      } else if (serial) {
+      } else {
         setDoc(statusRef, { 
-            deviceId: serial, 
+            deviceId: currentDeviceId, 
             pairing_token: Math.floor(100000 + Math.random() * 900000).toString(), 
             status: "online", 
             last_online: serverTimestamp(), 
@@ -180,14 +136,76 @@ function KioskContent() {
             templates_stored: 0,
             enrollment_status: "IDLE",
             scan_status: "idle"
-        }, { merge: true }).catch(e => console.error("Initial setDoc error:", e));
+        }, { merge: true });
       }
-    }, (err) => {
-      console.log("Kiosk Status Listener Error:", err.message);
     });
 
     return () => unsubscribeStatus();
-  }, [urlDeviceId, view]);
+  }, [currentDeviceId]);
+
+  // 3. UI LOGIC STATE MACHINE (Reacts to systemStatus changes)
+  useEffect(() => {
+    if (!systemStatus) return;
+
+    // Handle User Pairing
+    if (systemStatus.userId && systemStatus.userId !== currentUserId) {
+        setCurrentUserId(systemStatus.userId);
+    }
+
+    if (!systemStatus.userId) {
+        if (view !== "pairing") setView("pairing");
+        return;
+    }
+
+    // Handle View Transitions
+    if (view === "pairing" || view === "processing") {
+        setView("home");
+    }
+
+    if (systemStatus.enrollment_status === "SUCCESS" && view === "enrollment-step") {
+        setTimeout(() => setView("home"), 2000);
+    }
+
+    if (view === "attendance" || view === "searching") {
+        if (systemStatus.scan_status === "searching") {
+            setView("searching");
+        } else if (systemStatus.scan_status === "success") {
+            setLastStudentName(systemStatus.last_student_name || "Unknown Student");
+            setView("success");
+            setTimeout(() => setView("home"), 3500);
+        } else if (systemStatus.scan_status === "no_match") {
+            setView("no-match");
+            setTimeout(() => setView("attendance"), 3000);
+        }
+    }
+    
+    if (systemStatus.enrollment_status?.includes("ERROR") && view === "enrollment-step") {
+        setTimeout(() => {
+            const db = getDb();
+            updateDoc(doc(db, "system_status", currentDeviceId!), { enrollment_status: "IDLE" });
+            setView("registration");
+        }, 4000);
+    }
+  }, [systemStatus, currentUserId, currentDeviceId, view]);
+
+  // 4. STABLE DATA LISTENER
+  useEffect(() => {
+    if (!currentUserId) return;
+    const db = getDb();
+    const qStudents = collection(db, "institutes", currentUserId, "students");
+    
+    const unsubscribeData = onSnapshot(qStudents, (snap) => {
+        const docs = snap.docs;
+        if (docs.length !== studentCount) {
+            setStudentCount(docs.length);
+        }
+        
+        const classes = Array.from(new Set(docs.map(d => d.data().className).filter(c => !!c))).sort() as string[];
+        setAvailableClasses(classes);
+    });
+
+    return () => unsubscribeData();
+  }, [currentUserId, studentCount]);
 
   const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
@@ -301,7 +319,6 @@ function KioskContent() {
   return (
     <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950", view === "no-match" && "bg-rose-950", view === "searching" && "bg-indigo-950")}>
       
-      {/* MEGA HEADER */}
       <div className="h-28 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
         <div className="flex items-center gap-8">
             <CalendarCheck className="h-14 w-14 text-primary" />
@@ -330,7 +347,7 @@ function KioskContent() {
             className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl"
           >
             <ChevronLeft className="h-10 w-10" />
-            <span className="text-xl font-black uppercase tracking-widest">BACK</span>
+            <span className="textxl font-black uppercase tracking-widest">BACK</span>
           </button>
         )}
 
@@ -450,7 +467,7 @@ function KioskContent() {
                     <Activity className="h-12 w-12 text-indigo-400" />
                     <div className="flex flex-col">
                         <span className="text-lg font-black text-white/30 uppercase">ENGINE</span>
-                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">HYBRID v12.5</span>
+                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">v12.7 PRO</span>
                     </div>
                 </div>
             </div>
