@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -24,7 +23,10 @@ import {
   ClipboardList,
   PieChart,
   ArrowRight,
-  TrendingUp
+  TrendingUp,
+  Cpu,
+  Zap,
+  Lock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -210,7 +212,9 @@ function KioskContent() {
         await addDoc(collection(db, "kiosk_commands"), {
             type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
         });
-        await updateDoc(doc(db, "system_status", currentDeviceId), { scan_status: "idle", last_student_name: "" });
+        await updateDoc(doc(db, "system_status", currentDeviceId), {
+            scan_status: "idle", last_student_name: ""
+        });
     }
     setView("home");
   };
@@ -241,6 +245,33 @@ function KioskContent() {
             <ChevronLeft className="h-10 w-10" />
             <span className="text-xl font-black uppercase tracking-widest">BACK</span>
           </button>
+        )}
+
+        {view === "pairing" && (
+          <div className="w-full max-w-[1200px] flex flex-col items-center justify-center space-y-16 animate-in zoom-in duration-700">
+            <div className="relative">
+                <div className="absolute inset-0 bg-primary/20 blur-[150px] rounded-full animate-pulse" />
+                <div className="relative p-20 bg-slate-900/60 rounded-[4rem] border-4 border-primary/20 shadow-2xl flex flex-col items-center gap-8">
+                    <Lock className="h-32 w-32 text-primary" />
+                    <div className="text-center space-y-4">
+                        <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Device Locked</h2>
+                        <p className="text-2xl font-bold text-slate-500 uppercase tracking-widest">Enter this code in your Admin Dashboard</p>
+                    </div>
+                    <div className="bg-black/60 px-24 py-12 rounded-[3rem] border-4 border-primary/40 shadow-inner">
+                        <span className="text-[12rem] font-black text-white tracking-[0.2em] italic leading-none text-glow-white">
+                            {systemStatus?.pairing_token || "------"}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            <div className="flex items-center gap-6 bg-slate-900/40 px-12 py-6 rounded-3xl border border-white/5 backdrop-blur-md">
+                <Cpu className="h-10 w-10 text-slate-600" />
+                <div className="flex flex-col">
+                    <span className="text-lg font-black text-slate-600 uppercase tracking-widest leading-none">Hardware ID</span>
+                    <span className="text-2xl font-mono font-bold text-white/40">{currentDeviceId}</span>
+                </div>
+            </div>
+          </div>
         )}
 
         {view === "class-selection" && (
