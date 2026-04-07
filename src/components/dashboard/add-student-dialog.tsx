@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -25,8 +24,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { Student } from "@/lib/types";
-import { Loader2, Fingerprint } from "lucide-react";
+import { Loader2, Fingerprint, CheckCircle2, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { cn } from "@/lib/utils";
 
 const studentFormSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters."),
@@ -101,21 +101,21 @@ export function AddStudentDialog({
   const renderStep1 = () => (
     <>
       <DialogHeader>
-        <DialogTitle>Add New Student (Step 1 of 2)</DialogTitle>
+        <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase">Add New Student <span className="text-primary">(Step 1 of 2)</span></DialogTitle>
         <DialogDescription>
-          Enter the student's details. The roll number will be assigned automatically.
+          Enter basic details to initialize the student node.
         </DialogDescription>
       </DialogHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
           <FormField
             control={form.control}
             name="name"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Full Name</FormLabel>
+                <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Full Name</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g. John Doe" {...field} disabled={isAdding} />
+                  <Input placeholder="e.g. John Doe" {...field} disabled={isAdding} className="bg-slate-900/50 border-white/5 rounded-xl h-11" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -126,13 +126,13 @@ export function AddStudentDialog({
             name="phone"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Parent's Phone Number</FormLabel>
+                <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Parent's Phone Number</FormLabel>
                 <FormControl>
                   <div className="flex items-center">
-                      <span className="inline-flex items-center px-3 text-sm text-gray-500 border border-r-0 border-gray-300 rounded-l-md bg-gray-50 h-10">
+                      <span className="inline-flex items-center px-4 text-xs font-black bg-slate-800 border border-r-0 border-white/5 rounded-l-xl h-11 text-primary">
                           +91
                       </span>
-                      <Input placeholder="1234567890" {...field} className="rounded-l-none" disabled={isAdding}/>
+                      <Input placeholder="1234567890" {...field} className="rounded-l-none rounded-r-xl h-11 bg-slate-900/50 border-white/5" disabled={isAdding}/>
                   </div>
                 </FormControl>
                 <FormMessage />
@@ -144,18 +144,18 @@ export function AddStudentDialog({
             name="className"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Class</FormLabel>
+                <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Class Identifier</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g. Grade 10A" {...field} disabled={isAdding} />
+                  <Input placeholder="e.g. Grade 10A" {...field} disabled={isAdding} className="bg-slate-900/50 border-white/5 rounded-xl h-11" />
                 </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
-          <DialogFooter>
-            <Button type="submit" disabled={isAdding}>
+          <DialogFooter className="pt-4">
+            <Button type="submit" disabled={isAdding} className="w-full h-12 bg-primary hover:bg-primary/90 font-black italic uppercase rounded-xl shadow-xl shadow-primary/20 transition-all">
               {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save & Go to Enroll
+              INITIATE ENROLLMENT
             </Button>
           </DialogFooter>
         </form>
@@ -163,58 +163,84 @@ export function AddStudentDialog({
     </>
   );
 
+  const isSuccess = enrollmentStatus === 'SUCCESS';
+  const isError = enrollmentStatus?.includes('ERROR') || enrollmentStatus === 'MATCH_ERROR';
+
   const renderStep2 = () => (
     <>
       <DialogHeader>
-        <DialogTitle>Enroll Fingerprint (Step 2 of 2)</DialogTitle>
+        <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase">Biometric Link <span className="text-primary">(Step 2 of 2)</span></DialogTitle>
         <DialogDescription>
-          For student: <span className="font-semibold text-primary">{studentToEnroll?.name}</span>
+          Linking student: <span className="font-bold text-white uppercase italic">{studentToEnroll?.name}</span>
         </DialogDescription>
       </DialogHeader>
       <div className="my-6">
-        <Card className="text-center p-6 border-dashed">
-            <CardHeader className="p-0 mb-4">
-                <CardTitle className="flex flex-col items-center justify-center gap-2 text-muted-foreground">
-                    <Fingerprint className="h-10 w-10 text-primary" />
-                    {appState === 'enrolling' ? 'Enrollment in Progress...' : 'Ready to Enroll'}
+        <Card className={cn(
+            "text-center p-8 border-2 border-dashed transition-all duration-500",
+            isSuccess ? "bg-emerald-500/10 border-emerald-500/50" : (isError ? "bg-rose-500/10 border-rose-500/50" : "bg-slate-900/40 border-white/10")
+        )}>
+            <CardHeader className="p-0 mb-6">
+                <CardTitle className="flex flex-col items-center justify-center gap-4">
+                    {isSuccess ? (
+                        <CheckCircle2 className="h-16 w-16 text-emerald-500 animate-in zoom-in duration-500" />
+                    ) : isError ? (
+                        <AlertCircle className="h-16 w-16 text-rose-500 animate-bounce" />
+                    ) : (
+                        <Fingerprint className={cn("h-16 w-16 text-primary", appState === 'enrolling' && "animate-pulse")} />
+                    )}
+                    <span className={cn(
+                        "text-2xl font-black italic uppercase tracking-tighter",
+                        isSuccess ? "text-emerald-500" : (isError ? "text-rose-500" : "text-slate-400")
+                    )}>
+                        {isSuccess ? 'LINK ESTABLISHED!' : isError ? 'LINK FAILED' : (appState === 'enrolling' ? 'SCANNING FINGER...' : 'READY FOR SCAN')}
+                    </span>
                 </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-                <p className="text-muted-foreground h-10 flex items-center justify-center">
-                  {enrollmentStatus || "Click the button below to start the enrollment process."}
-                </p>
+                <div className="bg-black/40 px-4 py-3 rounded-xl border border-white/5">
+                    <p className="text-slate-500 font-mono text-[10px] uppercase tracking-widest leading-relaxed">
+                      {enrollmentStatus || "Waiting for hardware trigger..."}
+                    </p>
+                </div>
             </CardContent>
         </Card>
       </div>
-      <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2">
-        <Button 
-          onClick={() => studentToEnroll && onEnroll(studentToEnroll)}
-          disabled={!arduinoStatus.connected || appState === 'enrolling'}
-          className="w-full"
-        >
-          {appState === 'enrolling' 
-            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            : <Fingerprint className="mr-2 h-4 w-4" />
-          }
-          {appState === 'enrolling' ? 'Enrolling...' : 'Start Enrollment'}
-        </Button>
-         <p className="text-xs text-center text-muted-foreground">
-            Device Status: 
-            <span className={arduinoStatus.connected ? "text-green-500" : "text-destructive"}>
-              {` ${arduinoStatus.message}`}
-            </span>
-        </p>
+      <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-4">
+        {isSuccess ? (
+            <Button onClick={() => onOpenChange(false)} className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 text-white font-black italic uppercase rounded-2xl shadow-xl shadow-emerald-500/20">
+                CLOSE NODE TERMINAL
+            </Button>
+        ) : (
+            <Button 
+              onClick={() => studentToEnroll && onEnroll(studentToEnroll)}
+              disabled={!arduinoStatus.connected || appState === 'enrolling'}
+              className="w-full h-14 bg-primary hover:bg-primary/90 font-black italic uppercase rounded-2xl shadow-xl shadow-primary/20"
+            >
+              {appState === 'enrolling' 
+                ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                : <Fingerprint className="mr-2 h-5 w-5" />
+              }
+              {appState === 'enrolling' ? 'COMMUNICATING...' : 'START BIOMETRIC SCAN'}
+            </Button>
+        )}
+         <div className="flex items-center justify-center gap-3 py-2">
+            <div className={cn("h-2 w-2 rounded-full", arduinoStatus.connected ? "bg-emerald-500 animate-pulse" : "bg-rose-500")} />
+            <p className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-600">
+                SYSTEM STATUS: <span className={arduinoStatus.connected ? "text-emerald-500" : "text-rose-500"}>{arduinoStatus.message}</span>
+            </p>
+        </div>
       </DialogFooter>
     </>
   );
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        {currentStep === 1 ? renderStep1() : renderStep2()}
+      <DialogContent className="sm:max-w-md bg-slate-950 border-white/10 rounded-[2.5rem] shadow-[0_0_80px_rgba(0,0,0,0.8)] overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-16 -mt-16" />
+        <div className="relative z-10">
+            {currentStep === 1 ? renderStep1() : renderStep2()}
+        </div>
       </DialogContent>
     </Dialog>
   );
 }
-
-    

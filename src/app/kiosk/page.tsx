@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useCallback, useMemo } from "react";
 import { format } from "date-fns";
 import { useSearchParams } from "next/navigation";
 import { 
@@ -20,7 +20,11 @@ import {
   BookOpen,
   Link as LinkIcon,
   AlertTriangle,
-  XCircle
+  XCircle,
+  ClipboardList,
+  PieChart,
+  ArrowRight,
+  TrendingUp
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -33,23 +37,9 @@ import {
   addDoc,
   onSnapshot,
   setDoc,
-  updateDoc
+  updateDoc,
+  getDocs
 } from "firebase/firestore";
-
-const KEYBOARD_LAYOUT = [
-  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
-  ["Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"],
-  ["A", "S", "D", "F", "G", "H", "J", "K", "L"],
-  ["CapsLock", "Z", "X", "C", "V", "B", "N", "M", "Backspace"],
-  ["Space"]
-];
-
-const NUMPAD_LAYOUT = [
-  ["1", "2", "3"],
-  ["4", "5", "6"],
-  ["7", "8", "9"],
-  ["0", "Backspace"]
-];
 
 const BootingScreen = () => {
   const [progress, setProgress] = useState(0);
@@ -70,7 +60,7 @@ const BootingScreen = () => {
       <h1 className="text-7xl font-black text-white italic tracking-tighter uppercase mb-4 text-glow-white">
         BioSync <span className="text-primary">Box</span>
       </h1>
-      <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold mb-12">OS KERNEL v12.7.PRO</p>
+      <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold mb-12">OS KERNEL v13.2.PRO</p>
       <div className="w-96 space-y-4">
         <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
           <div className="h-full bg-primary shadow-[0_0_20px_rgba(59,130,246,1)] transition-all duration-200 rounded-full" style={{ width: `${progress}%` }} />
@@ -85,19 +75,18 @@ function KioskContent() {
   const urlDeviceId = searchParams.get("deviceId");
   
   const [isBooting, setIsBooting] = useState(true);
-  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match" | "searching" | "class-selection">("processing");
+  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "no-match" | "searching" | "class-selection" | "daily-report">("processing");
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [lastStudentName, setLastStudentName] = useState<string | null>(null);
   const [studentCount, setStudentCount] = useState(0);
-  const [isCaps, setIsCaps] = useState(true);
+  const [allStudents, setAllStudents] = useState<any[]>([]);
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
   const { toast } = useToast();
 
   const [regData, setRegData] = useState({ name: "", rollNo: "", class: "", phone: "" });
-  const [activeInput, setActiveInput] = useState<keyof typeof regData | null>(null);
 
   useEffect(() => {
     const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -105,7 +94,6 @@ function KioskContent() {
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
   }, []);
 
-  // 1. STABLE DEVICE ID
   useEffect(() => {
     let serial = urlDeviceId;
     if (!serial && typeof window !== 'undefined') serial = localStorage.getItem("pi_serial_mock");
@@ -116,34 +104,24 @@ function KioskContent() {
     setCurrentDeviceId(serial);
   }, [urlDeviceId]);
 
-  // 2. STABLE STATUS LISTENER
   useEffect(() => {
     if (!currentDeviceId) return;
     const db = getDb();
     const statusRef = doc(db, "system_status", currentDeviceId);
     
-    const unsubscribeStatus = onSnapshot(statusRef, (snap) => {
+    return onSnapshot(statusRef, (snap) => {
       if (snap.exists()) {
-        const data = snap.data();
-        setSystemStatus(data);
+        setSystemStatus(snap.data());
       } else {
         setDoc(statusRef, { 
-            deviceId: currentDeviceId, 
-            pairing_token: Math.floor(100000 + Math.random() * 900000).toString(), 
-            status: "online", 
-            last_online: serverTimestamp(), 
-            hardware_ready: true, 
-            templates_stored: 0,
-            enrollment_status: "IDLE",
-            scan_status: "idle"
+            deviceId: currentDeviceId, pairing_token: Math.floor(100000 + Math.random() * 900000).toString(), 
+            status: "online", last_online: serverTimestamp(), hardware_ready: true, 
+            templates_stored: 0, enrollment_status: "IDLE", scan_status: "idle"
         }, { merge: true });
       }
     });
-
-    return () => unsubscribeStatus();
   }, [currentDeviceId]);
 
-  // 3. UI LOGIC STATE MACHINE
   useEffect(() => {
     if (!systemStatus || !currentDeviceId) return;
 
@@ -156,94 +134,70 @@ function KioskContent() {
         return;
     }
 
-    if (view === "pairing" || view === "processing") {
-        setView("home");
-    }
-
-    if (systemStatus.enrollment_status === "SUCCESS" && view === "enrollment-step") {
-        setTimeout(() => setView("home"), 2000);
-    }
-
-    // React to success status only when in relevant views
-    if (view === "attendance" || view === "searching") {
-        if (systemStatus.scan_status === "searching") {
-            setView("searching");
-        } else if (systemStatus.scan_status === "success") {
-            setLastStudentName(systemStatus.last_student_name || "Unknown Student");
-            setView("success");
-            
-            // AUTOMATIC REDIRECT TO HOME AFTER 3 SECONDS
-            const timer = setTimeout(async () => {
-                const db = getDb();
-                // Send END_ATTENDANCE command to Pi
-                await addDoc(collection(db, "kiosk_commands"), {
-                    type: "END_ATTENDANCE",
-                    deviceId: currentDeviceId,
-                    status: "pending",
-                    createdAt: serverTimestamp()
-                });
-                // Reset status in DB to kill ghost triggers
-                await updateDoc(doc(db, "system_status", currentDeviceId), {
-                    scan_status: "idle",
-                    last_student_name: ""
-                });
-                setView("home");
-            }, 3000);
-            
-            return () => clearTimeout(timer);
-        } else if (systemStatus.scan_status === "no_match") {
-            setView("no-match");
-            const timer = setTimeout(() => setView("attendance"), 3000);
-            return () => clearTimeout(timer);
+    if (systemStatus.enrollment_status && systemStatus.enrollment_status !== "IDLE" && view !== "enrollment-step") {
+        setView("enrollment-step");
+        if (systemStatus.enrolling_student_name) {
+            setRegData(prev => ({ ...prev, name: systemStatus.enrolling_student_name }));
         }
     }
-    
-    if (systemStatus.enrollment_status?.includes("ERROR") && view === "enrollment-step") {
+
+    if (view === "pairing" || view === "processing") setView("home");
+
+    if (systemStatus.enrollment_status === "SUCCESS" && view === "enrollment-step") {
         setTimeout(() => {
+            setView("home");
+            setRegData({ name: "", rollNo: "", class: "", phone: "" });
+        }, 2500);
+    }
+
+    if ((view === "attendance" || view === "searching") && systemStatus.scan_status === "success") {
+        setLastStudentName(systemStatus.last_student_name || "Unknown Student");
+        setView("success");
+        
+        const timer = setTimeout(async () => {
             const db = getDb();
-            updateDoc(doc(db, "system_status", currentDeviceId!), { enrollment_status: "IDLE" });
-            setView("registration");
-        }, 4000);
+            await addDoc(collection(db, "kiosk_commands"), {
+                type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
+            });
+            await updateDoc(doc(db, "system_status", currentDeviceId), {
+                scan_status: "idle", last_student_name: ""
+            });
+            setView("home");
+        }, 3000);
+        return () => clearTimeout(timer);
     }
   }, [systemStatus, currentUserId, currentDeviceId, view]);
 
-  // 4. STABLE DATA LISTENER
   useEffect(() => {
     if (!currentUserId) return;
     const db = getDb();
     const qStudents = collection(db, "institutes", currentUserId, "students");
     
-    const unsubscribeData = onSnapshot(qStudents, (snap) => {
-        const docs = snap.docs;
-        setStudentCount(docs.length);
-        
-        const classes = Array.from(new Set(docs.map(d => d.data().className).filter(c => !!c))).sort() as string[];
+    return onSnapshot(qStudents, (snap) => {
+        const studentsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAllStudents(studentsData);
+        setStudentCount(snap.docs.length);
+        const classes = Array.from(new Set(snap.docs.map(d => d.data().className).filter(c => !!c))).sort() as string[];
         setAvailableClasses(classes);
     });
-
-    return () => unsubscribeData();
   }, [currentUserId]);
+
+  const globalStats = useMemo(() => {
+    const today = format(currentTime, "yyyy-MM-dd");
+    const total = allStudents.length;
+    const present = allStudents.filter(s => s.attendance?.[today] === 'present').length;
+    const absent = total - present;
+    return { total, present, absent };
+  }, [allStudents, currentTime]);
 
   const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
     try {
         const db = getDb();
-        // Step 1: Explicitly clear the status in DB to kill ghosts
-        await updateDoc(doc(db, "system_status", currentDeviceId), {
-            scan_status: "idle",
-            last_student_name: ""
-        });
-
-        // Step 2: Send the command
+        await updateDoc(doc(db, "system_status", currentDeviceId), { scan_status: "idle", last_student_name: "" });
         await addDoc(collection(db, "kiosk_commands"), {
-            type: "START_ATTENDANCE",
-            deviceId: currentDeviceId,
-            userId: currentUserId,
-            className: className,
-            status: "pending",
-            createdAt: serverTimestamp()
+            type: "START_ATTENDANCE", deviceId: currentDeviceId, userId: currentUserId, className: className, status: "pending", createdAt: serverTimestamp()
         });
-        
         setView("attendance");
     } catch (e) {
         toast({ variant: "destructive", title: "Error", description: "Failed to trigger attendance." });
@@ -251,117 +205,29 @@ function KioskContent() {
   };
 
   const handleBack = async () => {
-    const db = getDb();
     if ((view === "attendance" || view === "searching" || view === "no-match" || view === "success") && currentDeviceId) {
+        const db = getDb();
         await addDoc(collection(db, "kiosk_commands"), {
-            type: "END_ATTENDANCE",
-            deviceId: currentDeviceId,
-            status: "pending",
-            createdAt: serverTimestamp()
+            type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
         });
-        // Clear status on back too
-        await updateDoc(doc(db, "system_status", currentDeviceId), {
-            scan_status: "idle",
-            last_student_name: ""
-        });
+        await updateDoc(doc(db, "system_status", currentDeviceId), { scan_status: "idle", last_student_name: "" });
     }
-    
-    if (view === "class-selection") setView("home");
-    else if (view === "enrollment-step") setView("registration");
-    else if (view === "registration" || view === "attendance" || view === "searching" || view === "no-match" || view === "success") { setView("home"); setActiveInput(null); }
-    else if (activeInput) setActiveInput(null);
-  };
-
-  const onKeyPress = (key: string) => {
-    if (key === "CapsLock") { setIsCaps(!isCaps); return; }
-    if (!activeInput) return;
-    setRegData(prev => {
-      const currentVal = prev[activeInput];
-      if (key === "Backspace") return { ...prev, [activeInput]: currentVal.slice(0, -1) };
-      if (activeInput === 'phone' && currentVal.length >= 10) return prev;
-      let char = (key === "Space") ? " " : (isCaps ? key.toUpperCase() : key.toLowerCase());
-      const finalChar = /^\d$/.test(key) ? key : char;
-      return { ...prev, [activeInput]: currentVal + finalChar };
-    });
-  };
-
-  const handleRegistration = async () => {
-    if (!currentUserId || !currentDeviceId) {
-      toast({ variant: "destructive", title: "Pairing Required", description: "This device is not linked to any institute." });
-      return;
-    }
-    if (!regData.name || !regData.rollNo) {
-      toast({ variant: "destructive", title: "Input Missing", description: "Name and Roll No are required." });
-      return;
-    }
-    
-    try {
-      const db = getDb();
-      await updateDoc(doc(db, "system_status", currentDeviceId), { enrollment_status: "PREPARING" });
-      
-      const studentCol = collection(db, "institutes", currentUserId, "students");
-      const docRef = await addDoc(studentCol, {
-        name: regData.name, 
-        rollNo: Number(regData.rollNo), 
-        className: regData.class || "10A", 
-        phone: regData.phone ? `+91${regData.phone}` : "",
-        fingerprintID: "HYBRID_STORAGE", 
-        attendance: {}, 
-        userId: currentUserId, 
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-
-      await addDoc(collection(db, "kiosk_commands"), {
-        type: "ENROLL", 
-        studentId: docRef.id, 
-        userId: currentUserId, 
-        studentName: regData.name, 
-        deviceId: currentDeviceId, 
-        status: "pending", 
-        createdAt: serverTimestamp()
-      });
-
-      setView("enrollment-step");
-    } catch (e: any) { 
-      console.error("Registration Error:", e);
-      toast({ variant: "destructive", title: "Registration Failed", description: e.message || "Database Error." }); 
-    }
-  };
-
-  const getEnrollmentMessage = () => {
-    switch(systemStatus?.enrollment_status) {
-        case "PREPARING": return "CALIBRATING SENSOR...";
-        case "PLACE_FINGER": return "PLACE FINGER ON SENSOR";
-        case "REMOVE_FINGER": return "REMOVE YOUR FINGER";
-        case "PLACE_AGAIN": return "PLACE SAME FINGER AGAIN";
-        case "SAVING_TO_PI": return "SYNCING DATA TO PI MEMORY...";
-        case "SUCCESS": return "ENROLLMENT SUCCESSFUL!";
-        case "ERROR_IMAGE": return "SCAN ERROR! TRY AGAIN";
-        case "MATCH_ERROR": return "FINGERS DO NOT MATCH";
-        case "HARDWARE_ERROR": return "SENSOR BUSY! RESTARTING...";
-        default: return "INITIALIZING...";
-    }
+    setView("home");
   };
 
   if (isBooting) return <BootingScreen />;
 
   return (
     <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950", view === "no-match" && "bg-rose-950", view === "searching" && "bg-indigo-950")}>
-      
       <div className="h-28 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
         <div className="flex items-center gap-8">
             <CalendarCheck className="h-14 w-14 text-primary" />
-            <span className="font-black text-5xl tracking-tighter text-white uppercase italic">
-                BioSync <span className="text-primary">Box</span>
-            </span>
+            <span className="font-black text-5xl tracking-tighter text-white uppercase italic">BioSync <span className="text-primary">Box</span></span>
         </div>
         <div className="flex items-center gap-12">
            <div className="flex items-center gap-4 bg-black/40 px-8 py-3 rounded-3xl border border-white/5">
               <div className={cn("h-4 w-4 rounded-full", systemStatus?.status === 'online' ? "bg-emerald-500 animate-pulse" : "bg-rose-500")} />
-              <span className="text-xl font-black text-white uppercase tracking-widest">
-                {systemStatus?.status || "OFFLINE"}
-              </span>
+              <span className="text-xl font-black text-white uppercase tracking-widest">{systemStatus?.status || "OFFLINE"}</span>
            </div>
            <div className="font-mono text-4xl font-bold text-white tracking-widest bg-primary/10 px-8 py-3 rounded-3xl border border-primary/20">
              {format(currentTime, "HH:mm")}
@@ -370,78 +236,60 @@ function KioskContent() {
       </div>
 
       <div className="flex-1 relative flex flex-col items-center justify-center">
-        
         {(view !== "home" && view !== "processing" && view !== "pairing") && (
-          <button 
-            onClick={handleBack}
-            className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 hover:bg-white/10 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl"
-          >
+          <button onClick={handleBack} className="absolute top-8 left-10 z-[160] h-20 px-8 bg-white/5 border border-white/10 rounded-[2rem] flex items-center gap-4 text-white transition-all active:scale-95 shadow-2xl">
             <ChevronLeft className="h-10 w-10" />
-            <span className="textxl font-black uppercase tracking-widest">BACK</span>
+            <span className="text-xl font-black uppercase tracking-widest">BACK</span>
           </button>
         )}
 
         {view === "class-selection" && (
           <div className="w-full max-w-[1400px] flex flex-col items-center gap-16 animate-in fade-in duration-500">
-            <div className="text-center space-y-4">
-                <h2 className="text-7xl font-black text-white italic uppercase tracking-tighter">Select Class</h2>
-                <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Syncing Class Rosters</p>
-            </div>
+            <h2 className="text-7xl font-black text-white italic uppercase tracking-tighter">Select Class</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8 w-full px-10">
-                {availableClasses.length > 0 ? (
-                    availableClasses.map((className) => (
-                        <button 
-                            key={className}
-                            onClick={() => handleStartAttendance(className)}
-                            className="h-40 bg-slate-900/60 border-4 border-white/5 hover:border-primary rounded-[2.5rem] flex flex-col items-center justify-center gap-2 transition-all active:scale-95 shadow-2xl group"
-                        >
-                            <BookOpen className="h-10 w-10 text-primary/40 group-hover:text-primary transition-colors" />
-                            <span className="text-5xl font-black text-white italic uppercase tracking-tighter">{className}</span>
-                        </button>
-                    ))
-                ) : (
-                    <div className="col-span-full py-20 text-center text-slate-500 font-black uppercase text-3xl italic tracking-widest bg-white/5 rounded-[3rem] border border-dashed border-white/10">
-                        No Classes Found In Roster
+                {availableClasses.map((className) => (
+                    <button key={className} onClick={() => handleStartAttendance(className)} className="h-40 bg-slate-900/60 border-4 border-white/5 hover:border-primary rounded-[2.5rem] flex flex-col items-center justify-center gap-2 transition-all active:scale-95 shadow-2xl group">
+                        <BookOpen className="h-10 w-10 text-primary/40 group-hover:text-primary" />
+                        <span className="text-5xl font-black text-white italic uppercase tracking-tighter">{className}</span>
+                    </button>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {view === "daily-report" && (
+          <div className="w-full max-w-[1400px] flex flex-col items-center justify-center gap-16 animate-in zoom-in duration-700">
+            <div className="text-center space-y-4">
+                <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter flex items-center gap-6 justify-center">
+                    <TrendingUp className="h-20 w-20 text-indigo-500" />
+                    LIVE <span className="text-indigo-500">REPORT</span>
+                </h2>
+                <p className="text-3xl font-bold text-slate-500 uppercase tracking-[0.4em] italic">Aggregate status for {format(currentTime, "MMMM do, yyyy")}</p>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 w-full px-20">
+                <div className="bg-slate-900/60 border-4 border-white/5 rounded-[4rem] p-16 flex flex-col items-center justify-center gap-6 shadow-2xl group hover:border-indigo-500/30 transition-all">
+                    <Users className="h-24 w-24 text-indigo-400 opacity-50 group-hover:opacity-100 transition-opacity" />
+                    <div className="text-center">
+                        <p className="text-2xl font-black text-slate-500 uppercase tracking-[0.3em] mb-2">TOTAL REGISTERED</p>
+                        <p className="text-[12rem] font-black text-white italic leading-none tracking-tighter">{globalStats.total}</p>
                     </div>
-                )}
-            </div>
-          </div>
-        )}
+                </div>
 
-        {view === "searching" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in fade-in duration-500">
-             <div className="relative">
-                <div className="absolute inset-0 bg-indigo-500/30 blur-[150px] rounded-full animate-pulse" />
-                <div className="relative bg-indigo-500/10 p-32 rounded-full border-[20px] border-indigo-500/20 shadow-2xl">
-                    <Search className="h-64 w-64 text-indigo-400 animate-pulse" />
-                    <div className="absolute top-0 left-0 w-full h-full border-[10px] border-indigo-500/40 rounded-full animate-ping" />
+                <div className="bg-emerald-950/30 border-4 border-emerald-500/20 rounded-[4rem] p-16 flex flex-col items-center justify-center gap-6 shadow-2xl group hover:border-emerald-500/50 transition-all">
+                    <CheckCircle2 className="h-24 w-24 text-emerald-500 opacity-50 group-hover:opacity-100 transition-opacity" />
+                    <div className="text-center">
+                        <p className="text-2xl font-black text-emerald-500 uppercase tracking-[0.3em] mb-2">PRESENT TODAY</p>
+                        <p className="text-[12rem] font-black text-emerald-400 italic leading-none tracking-tighter">{globalStats.present}</p>
+                    </div>
                 </div>
             </div>
-            <div className="space-y-8">
-                <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Searching...</h1>
-                <p className="text-indigo-300 font-mono text-3xl tracking-[0.2em] uppercase font-black">Matching with Class Roster</p>
-            </div>
-          </div>
-        )}
 
-        {view === "pairing" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-12 p-8">
-            <div className="relative">
-                <div className="absolute inset-0 bg-primary/20 blur-[100px] rounded-full animate-pulse" />
-                <div className="relative p-12 bg-slate-900/50 rounded-[4rem] border border-primary/20 shadow-2xl">
-                    <LinkIcon className="h-24 w-24 text-primary animate-pulse" />
-                </div>
-            </div>
-            <div className="space-y-6">
-                <h2 className="text-6xl font-black text-white italic uppercase tracking-tighter">Pair Device</h2>
-                <p className="text-slate-400 text-2xl font-medium max-w-2xl leading-relaxed">
-                  Enter token in Dashboard <span className="text-primary italic font-bold">Device Center</span>
+            <div className="bg-slate-900/40 border-2 border-white/10 rounded-[3rem] px-12 py-8 flex items-center gap-8 backdrop-blur-md">
+                <Activity className="h-10 w-10 text-rose-500 animate-pulse" />
+                <p className="text-2xl font-bold text-slate-400 uppercase tracking-widest italic">
+                    <span className="text-rose-500">{globalStats.absent}</span> Registered students are currently marked absent.
                 </p>
-            </div>
-            <div className="bg-primary/10 border-2 border-primary/30 px-24 py-12 rounded-[4rem] shadow-2xl">
-                <span className="text-[7rem] font-black text-white tracking-[0.1em] font-mono leading-none block text-glow-white">
-                    {systemStatus?.pairing_token || "------"}
-                </span>
             </div>
           </div>
         )}
@@ -449,106 +297,25 @@ function KioskContent() {
         {view === "home" && (
           <div className="w-full h-full flex flex-col items-center justify-between py-16 px-10 animate-in fade-in duration-700">
             <div className="text-center">
-                <div className="text-[12rem] font-black text-white tracking-tighter italic leading-none text-glow-white">
-                    {format(currentTime, "HH:mm")}
-                </div>
-                <div className="text-4xl font-bold text-primary uppercase tracking-[0.4em] mt-8">
-                    {format(currentTime, "EEEE, MMM do")}
-                </div>
+                <div className="text-[12rem] font-black text-white tracking-tighter italic leading-none text-glow-white">{format(currentTime, "HH:mm")}</div>
+                <div className="text-4xl font-bold text-primary uppercase tracking-[0.4em] mt-8">{format(currentTime, "EEEE, MMM do")}</div>
             </div>
-
             <div className="flex gap-12 w-full max-w-[1400px]">
-                <button 
-                    onClick={() => setView("class-selection")} 
-                    className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl"
-                >
-                    <div className="p-8 bg-primary/10 rounded-full border border-primary/20">
-                        <Fingerprint className="h-32 w-28 text-primary drop-shadow-[0_0_30px_rgba(59,130,246,0.8)]" />
-                    </div>
+                <button onClick={() => setView("class-selection")} className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-primary/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl">
+                    <div className="p-8 bg-primary/10 rounded-full border border-primary/20"><Fingerprint className="h-32 w-28 text-primary drop-shadow-[0_0_30px_rgba(59,130,246,0.8)]" /></div>
                     <span className="text-6xl font-black text-white uppercase italic tracking-tighter">Attendance</span>
                 </button>
-                <button 
-                    onClick={() => { setRegData({name: "", rollNo: "", class: "", phone: ""}); setView("registration"); }} 
-                    className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-emerald-500/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl"
-                >
-                    <div className="p-8 bg-emerald-500/10 rounded-full border border-emerald-500/20">
-                        <UserPlus className="h-32 w-28 text-emerald-500 drop-shadow-[0_0_30px_rgba(16,185,129,0.8)]" />
-                    </div>
-                    <span className="text-6xl font-black text-white uppercase italic tracking-tighter">Register</span>
+                <button onClick={() => setView("daily-report")} className="group relative flex-1 h-[350px] bg-slate-900/60 border-4 border-white/10 hover:border-indigo-500/50 rounded-[4rem] flex flex-col items-center justify-center gap-8 transition-all active:scale-95 shadow-2xl">
+                    <div className="p-8 bg-indigo-500/10 rounded-full border border-indigo-500/20"><ClipboardList className="h-32 w-28 text-indigo-500 drop-shadow-[0_0_30px_rgba(99,102,241,0.8)]" /></div>
+                    <span className="text-6xl font-black text-white uppercase italic tracking-tighter">Live Report</span>
                 </button>
             </div>
-
             <div className="w-full max-w-[1400px] bg-slate-900/40 border-2 border-white/10 rounded-[3rem] p-10 grid grid-cols-3 gap-12 backdrop-blur-md">
-                <div className="flex items-center gap-6 border-r border-white/10">
-                    <Users className="h-12 w-12 text-primary" />
-                    <div className="flex flex-col">
-                        <span className="text-lg font-black text-white/30 uppercase">STUDENTS</span>
-                        <span className="text-3xl font-bold text-white">{studentCount}</span>
-                    </div>
-                </div>
-                <div className="flex items-center gap-6 border-r border-white/10">
-                    <Database className="h-12 w-12 text-orange-500" />
-                    <div className="flex flex-col">
-                        <span className="text-lg font-black text-white/30 uppercase">STORAGE</span>
-                        <span className="text-3xl font-bold text-white">{systemStatus?.templates_stored || 0}</span>
-                    </div>
-                </div>
-                <div className="flex items-center gap-6">
-                    <Activity className="h-12 w-12 text-indigo-400" />
-                    <div className="flex flex-col">
-                        <span className="text-lg font-black text-white/30 uppercase">ENGINE</span>
-                        <span className="text-2xl font-bold text-indigo-400 uppercase italic">v12.7 PRO</span>
-                    </div>
-                </div>
+                <div className="flex items-center gap-6 border-r border-white/10"><Users className="h-12 w-12 text-primary" /><div className="flex flex-col"><span className="text-lg font-black text-white/30 uppercase">STUDENTS</span><span className="text-3xl font-bold text-white">{studentCount}</span></div></div>
+                <div className="flex items-center gap-6 border-r border-white/10"><Database className="h-12 w-12 text-orange-500" /><div className="flex flex-col"><span className="text-lg font-black text-white/30 uppercase">STORAGE</span><span className="text-3xl font-bold text-white">{systemStatus?.templates_stored || 0}</span></div></div>
+                <div className="flex items-center gap-6"><Activity className="h-12 w-12 text-indigo-400" /><div className="flex flex-col"><span className="text-lg font-black text-white/30 uppercase">ENGINE</span><span className="text-2xl font-bold text-indigo-400 uppercase italic">v13.2 PRO</span></div></div>
             </div>
           </div>
-        )}
-
-        {view === "registration" && (
-            <div className={cn("w-full h-full flex flex-col transition-all duration-500", activeInput && "-translate-y-48")}>
-                <div className="flex-1 flex flex-col items-center justify-center p-8">
-                    <div className="w-full max-w-[1200px] bg-slate-900/80 backdrop-blur-3xl p-16 rounded-[4rem] border-2 border-white/10 shadow-2xl">
-                        <h2 className="text-6xl font-black italic uppercase text-primary mb-12 tracking-widest text-center border-b-2 border-white/5 pb-8">Enroll Student</h2>
-                        <div className="grid grid-cols-2 gap-8">
-                            <div onClick={() => setActiveInput("name")} className={cn("col-span-2 px-12 py-8 rounded-3xl border-4 transition-all cursor-pointer", activeInput === "name" ? "border-primary bg-primary/10" : "border-white/5 bg-white/5")}>
-                                <label className="text-lg font-black uppercase text-white/40 block tracking-widest mb-4">FULL NAME</label>
-                                <div className="text-5xl font-bold truncate h-16 flex items-center">{regData.name || "---"}</div>
-                            </div>
-                            <div onClick={() => setActiveInput("rollNo")} className={cn("px-12 py-8 rounded-3xl border-4 transition-all cursor-pointer", activeInput === "rollNo" ? "border-primary bg-primary/10" : "border-white/5 bg-white/5")}>
-                                <label className="text-lg font-black uppercase text-white/40 block tracking-widest mb-4">ROLL NO</label>
-                                <div className="text-5xl font-bold h-16 flex items-center">{regData.rollNo || "00"}</div>
-                            </div>
-                            <div onClick={() => setActiveInput("class")} className={cn("px-12 py-8 rounded-3xl border-4 transition-all cursor-pointer", activeInput === "class" ? "border-primary bg-primary/10" : "border-white/5 bg-white/5")}>
-                                <label className="text-lg font-black uppercase text-white/40 block tracking-widest mb-4">CLASS</label>
-                                <div className="text-5xl font-bold h-16 flex items-center">{regData.class || "10A"}</div>
-                            </div>
-                        </div>
-                        {!activeInput && (
-                            <Button onClick={handleRegistration} className="w-full h-28 mt-12 text-5xl font-black bg-emerald-600 hover:bg-emerald-500 rounded-3xl uppercase italic tracking-tighter shadow-2xl">
-                                Start Biometric Scan
-                            </Button>
-                        )}
-                    </div>
-                </div>
-
-                <div className={cn("fixed bottom-0 left-0 right-0 bg-slate-950/98 backdrop-blur-3xl border-t-2 border-white/10 p-10 transition-all duration-500 z-[150]", activeInput ? "translate-y-0" : "translate-y-full")}>
-                    <div className="flex justify-between items-center mb-8">
-                        <span className="text-2xl font-black text-primary uppercase">INPUT: <span className="text-white">{activeInput?.toUpperCase()}</span></span>
-                        <button onClick={() => setActiveInput(null)} className="h-14 px-10 bg-emerald-600 rounded-full font-black text-xl uppercase text-white">CONFIRM</button>
-                    </div>
-                    <div className="flex flex-col gap-4 max-w-[1400px] mx-auto">
-                        {(activeInput === 'rollNo' ? NUMPAD_LAYOUT : KEYBOARD_LAYOUT).map((row, i) => (
-                        <div key={i} className="flex justify-center gap-4">
-                            {row.map(key => (
-                            <button key={key} onClick={() => onKeyPress(key)} className={cn("h-20 flex-1 min-w-[6rem] rounded-2xl text-3xl font-black transition-all active:scale-90", key === "Backspace" ? "bg-rose-500 text-white" : key === "CapsLock" ? cn("bg-indigo-500/20 text-indigo-400", isCaps && "bg-indigo-500 text-white") : "bg-white/10 text-white border border-white/5 shadow-xl")}>
-                                {key === "Backspace" ? "DEL" : key === "CapsLock" ? "ABC" : key === "Space" ? "SPACE" : isCaps ? key.toUpperCase() : key.toLowerCase()}
-                            </button>
-                            ))}
-                        </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
         )}
 
         {view === "attendance" && (
@@ -560,77 +327,44 @@ function KioskContent() {
                     <div className="absolute top-0 left-0 w-full h-2 bg-primary shadow-[0_0_50px_rgba(59,130,246,1)] animate-scan-line" />
                 </div>
             </div>
-            <div className="space-y-8">
-                <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Scan Finger</h1>
-                <div className="flex items-center justify-center gap-6 bg-white/5 px-10 py-4 rounded-full border border-white/10">
-                    <ShieldCheck className="h-10 w-10 text-emerald-500" />
-                    <p className="text-primary font-mono text-2xl tracking-[0.4em] uppercase font-black">Unlimited Class Sync Active</p>
-                </div>
-            </div>
+            <h1 className="text-8xl font-black text-white italic uppercase tracking-tighter">Scan Finger</h1>
           </div>
         )}
 
         {view === "success" && (
           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in zoom-in duration-700">
-            <div className="bg-emerald-500 p-24 rounded-full scale-110 shadow-[0_0_150px_rgba(16,185,129,0.6)] border-[20px] border-emerald-400/40">
-                <CheckCircle2 className="h-48 w-48 text-white" />
-            </div>
+            <div className="bg-emerald-500 p-24 rounded-full scale-110 shadow-[0_0_150px_rgba(16,185,129,0.6)] border-[20px] border-emerald-400/40"><CheckCircle2 className="h-48 w-48 text-white" /></div>
             <div className="space-y-8">
-                <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase text-glow-emerald">PRESENT</h2>
+                <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase">PRESENT</h2>
                 <p className="text-6xl text-emerald-300 font-black uppercase tracking-widest">{lastStudentName}</p>
-            </div>
-          </div>
-        )}
-
-        {view === "no-match" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in zoom-in duration-700">
-            <div className="bg-rose-500 p-24 rounded-full scale-110 shadow-[0_0_150px_rgba(244,63,94,0.6)] border-[20px] border-rose-400/40">
-                <XCircle className="h-48 w-48 text-white" />
-            </div>
-            <div className="space-y-8">
-                <h2 className="text-9xl font-black text-white italic tracking-tighter uppercase text-glow-rose">NO MATCH</h2>
-                <div className="space-y-4">
-                    <p className="text-4xl text-rose-300 font-black uppercase tracking-widest">ID NOT FOUND IN CLASS</p>
-                    <p className="text-xl text-slate-500 font-bold uppercase tracking-widest">Ensure you are scanning for the correct class.</p>
-                </div>
             </div>
           </div>
         )}
 
         {view === "enrollment-step" && (
             <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16 animate-in fade-in zoom-in duration-700">
-                <div className="relative p-16 bg-emerald-500/10 rounded-full border-[15px] border-emerald-500/20 shadow-2xl">
-                    {systemStatus?.enrollment_status?.includes("ERROR") ? (
-                        <AlertTriangle className="h-48 w-48 text-rose-500 animate-pulse" />
-                    ) : (
-                        <Fingerprint className="h-48 w-48 text-emerald-500 animate-pulse" />
-                    )}
-                </div>
+                <div className="relative p-16 bg-emerald-500/10 rounded-full border-[15px] border-emerald-500/20 shadow-2xl"><Fingerprint className="h-48 w-48 text-emerald-500 animate-pulse" /></div>
                 <div className="space-y-10">
-                    <h1 className="text-7xl font-black text-white italic uppercase tracking-tighter leading-none">{regData.name}</h1>
+                    <h1 className="text-7xl font-black text-white italic uppercase tracking-tighter leading-none">{regData.name || systemStatus?.enrolling_student_name || "Enrolling..."}</h1>
                     <div className={cn(
-                        "text-5xl font-mono tracking-[0.2em] font-black px-16 py-8 rounded-[3rem] border-4 shadow-2xl",
-                        systemStatus?.enrollment_status?.includes("ERROR") ? "bg-rose-500/10 border-rose-500/30 text-rose-400" : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                        "text-5xl font-mono tracking-[0.2em] font-black px-16 py-8 rounded-[3rem] border-4 shadow-2xl bg-emerald-500/10 border-emerald-500/30",
+                        systemStatus?.enrollment_status === 'SUCCESS' ? "text-emerald-400 border-emerald-400" : "text-emerald-400 animate-pulse"
                     )}>
-                        {getEnrollmentMessage()}
+                        {systemStatus?.enrollment_status || "INITIALIZING..."}
                     </div>
                 </div>
             </div>
         )}
 
-        {view === "processing" && (
-            <div className="flex-1 flex items-center justify-center">
-                <Loader2 className="h-48 w-48 text-primary animate-spin" />
-            </div>
-        )}
+        {view === "processing" && <div className="flex-1 flex items-center justify-center"><Loader2 className="h-48 w-48 text-primary animate-spin" /></div>}
       </div>
 
       <style jsx global>{`
         @keyframes scan-line { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
         .animate-scan-line { animation: scan-line 4s linear infinite; }
         .text-glow-white { text-shadow: 0 0 40px rgba(255,255,255,0.4); }
-        .text-glow-emerald { text-shadow: 0 0 60px rgba(16,185,129,0.6); }
-        .text-glow-rose { text-shadow: 0 0 60px rgba(244,63,94,0.6); }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
     </div>
   );

@@ -258,6 +258,22 @@ export default function DashboardPage() {
     });
   }, [currentUser?.uid, db]);
 
+  // 6. ENROLLMENT MONITOR: Reset appState when enrollment finishes
+  useEffect(() => {
+    if (appState === "enrolling" && deviceStatus?.enrollment_status === "SUCCESS") {
+      // Reduced delay for better UX
+      const timer = setTimeout(() => {
+        setAppState("idle");
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+    
+    if (appState === "enrolling" && (deviceStatus?.enrollment_status?.includes("ERROR") || deviceStatus?.enrollment_status === "MATCH_ERROR")) {
+        setAppState("idle");
+        toast({ variant: "destructive", title: "Enrollment Failed", description: deviceStatus.enrollment_status });
+    }
+  }, [deviceStatus?.enrollment_status, appState, toast]);
+
   // MEMOIZED VALUES
   const students = useMemo(() => {
     if (!currentUser) return [];

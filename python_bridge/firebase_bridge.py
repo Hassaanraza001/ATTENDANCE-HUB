@@ -18,7 +18,7 @@ COLLECTION_COMMANDS = "kiosk_commands"
 COLLECTION_STATUS = "system_status"
 COLLECTION_INSTITUTES = "institutes"
 
-HEARTBEAT_INTERVAL = 30 # Increased to save reads
+HEARTBEAT_INTERVAL = 60 # Increased to save writes
 
 db = None
 finger = None
@@ -62,7 +62,7 @@ def setup_firebase():
         firebase_admin.initialize_app(cred)
         db = firestore.client()
         
-        # Initial user pairing check (Done once at startup)
+        # Initial user pairing check (Done once at startup to save reads later)
         status_ref = db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL)
         doc = status_ref.get()
         if doc.exists:
@@ -105,14 +105,14 @@ def sync_templates_to_sensor(target_class=None, user_id=None):
             print("Wiping sensor internal library...")
             finger.empty_library() 
             slot_map = {}
-            name_map = {} # Reset names to avoid stale data (Fixes ghost "aaa" issue)
+            name_map = {} # Reset names to avoid stale data
             
-            # Fetch Students (One-time read for the entire class)
             if cached_user_id and target_class:
                 print(f"Fetching students for class: {target_class}")
+                # One-time read for the entire class - very efficient
                 students_ref = db.collection(COLLECTION_INSTITUTES).document(cached_user_id).collection("students")
                 query = students_ref.where("className", "==", target_class)
-                docs = query.get() # Batch read
+                docs = query.get() 
                 
                 current_slot = 1
                 for doc in docs:
@@ -130,13 +130,13 @@ def sync_templates_to_sensor(target_class=None, user_id=None):
                         time.sleep(0.02)
                         if finger.store_model(current_slot) == adafruit_fingerprint.OK:
                             slot_map[current_slot] = s_id
-                            name_map[s_id] = s_name
+                            name_map[s_id] = s_name # CACHE NAME LOCALLY
                             current_slot += 1
                             if current_slot > 127: break
             
             print(f"Sync Complete: {len(slot_map)} students cached locally.\n")
             
-            # Reset status to idle to prevent immediate ghost triggers
+            # Reset status to idle
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
                 "scan_status": "idle",
                 "last_student_name": ""
@@ -146,11 +146,12 @@ def sync_templates_to_sensor(target_class=None, user_id=None):
             print("Sync Error:", e)
 
 # ================= UI STATUS =================
-def update_ui_status(msg):
+def update_ui_status(msg, student_name=None):
     try:
-        db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).set({
-            "enrollment_status": msg
-        }, merge=True)
+        data = {"enrollment_status": msg}
+        if student_name:
+            data["enrolling_student_name"] = student_name
+        db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).set(data, merge=True)
     except: pass
 
 def update_online_status():
@@ -172,7 +173,7 @@ def heartbeat():
         time.sleep(HEARTBEAT_INTERVAL)
 
 # ================= ENROLL LOGIC =================
-def enroll(student_id, user_id):
+def enroll(student_id, user_id, student_name):
     global is_enrolling
     with sensor_lock:
         is_enrolling = True
@@ -180,43 +181,42 @@ def enroll(student_id, user_id):
             uart_port.reset_input_buffer()
             finger.empty_library()
             
-            update_ui_status("REMOVE_FINGER")
+            update_ui_status("REMOVE_FINGER", student_name)
             while finger.get_image() != adafruit_fingerprint.NOFINGER:
                 time.sleep(0.1)
             
-            update_ui_status("PLACE_FINGER")
+            update_ui_status("PLACE_FINGER", student_name)
             while finger.get_image() != adafruit_fingerprint.OK: 
                 time.sleep(0.1)
             finger.image_2_tz(1)
 
-            update_ui_status("REMOVE_FINGER")
+            update_ui_status("REMOVE_FINGER", student_name)
             time.sleep(1)
             while finger.get_image() != adafruit_fingerprint.NOFINGER: 
                 time.sleep(0.1)
 
-            update_ui_status("PLACE_AGAIN")
+            update_ui_status("PLACE_AGAIN", student_name)
             while finger.get_image() != adafruit_fingerprint.OK: 
                 time.sleep(0.1)
             finger.image_2_tz(2)
 
             if finger.create_model() == adafruit_fingerprint.OK:
-                update_ui_status("SAVING_TO_PI")
+                update_ui_status("SAVING_TO_PI", student_name)
                 data = finger.get_fpdata("char", 1)
                 if data:
                     with open(os.path.join(TEMPLATES_DIR, f"{student_id}.dat"), "wb") as f:
                         f.write(bytearray(data))
                     
-                    # Update Student Document
                     db.collection(COLLECTION_INSTITUTES).document(user_id).collection("students").document(student_id).update({
                         "fingerprintID": "HYBRID_STORAGE", 
                         "updatedAt": firestore.SERVER_TIMESTAMP
                     })
-                    update_ui_status("SUCCESS")
-                else: update_ui_status("HARDWARE_ERROR")
-            else: update_ui_status("MATCH_ERROR")
+                    update_ui_status("SUCCESS", student_name)
+                else: update_ui_status("HARDWARE_ERROR", student_name)
+            else: update_ui_status("MATCH_ERROR", student_name)
         except Exception as e:
             print("Enroll Error:", e)
-            update_ui_status("ERROR_IMAGE")
+            update_ui_status("ERROR_IMAGE", student_name)
         
         time.sleep(2)
         update_ui_status("IDLE")
@@ -232,7 +232,7 @@ def do_attendance_loop():
 
         with sensor_lock:
             try:
-                # Optimized Scan: No DB Reads here unless match found
+                # OPTIMIZED: No DB reads inside this loop unless a finger is matched
                 if finger.get_image() == adafruit_fingerprint.OK:
                     if finger.image_2_tz(1) == adafruit_fingerprint.OK:
                         if finger.finger_search() == adafruit_fingerprint.OK:
@@ -241,15 +241,17 @@ def do_attendance_loop():
                             student_name = name_map.get(student_id, "Unknown")
                             
                             if student_id and cached_user_id:
-                                # Update Attendance (Write only)
+                                # ZERO-READ ATTENDANCE: We already have ID and Name in local memory
                                 today = datetime.now().strftime("%Y-%m-%d")
                                 student_ref = db.collection(COLLECTION_INSTITUTES).document(cached_user_id).collection("students").document(student_id)
+                                
+                                # WRITE 1: Student Attendance
                                 student_ref.update({
                                     f"attendance.{today}": "present",
                                     "last_attendance": firestore.SERVER_TIMESTAMP
                                 })
                                 
-                                # Update Global Status (Write only)
+                                # WRITE 2: Global UI Status
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
                                     "scan_status": "success",
                                     "last_student_name": student_name,
@@ -257,11 +259,7 @@ def do_attendance_loop():
                                 })
                                 print(f"Attendance marked: {student_name}")
                                 time.sleep(4)
-                                # Reset scan status to idle so UI doesn't get stuck
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
-                        else:
-                            # Avoid constant updates if no match
-                            pass 
             except Exception as e:
                 print("Loop Error:", e)
                 time.sleep(1)
@@ -280,11 +278,10 @@ def listen_commands():
                     change.document.reference.update({"status": "processing"})
                     
                     if cmd_type == "ENROLL":
-                        threading.Thread(target=enroll, args=(data.get("studentId"), data.get("userId"))).start()
+                        threading.Thread(target=enroll, args=(data.get("studentId"), data.get("userId"), data.get("studentName", "New Student"))).start()
                     elif cmd_type == "START_ATTENDANCE":
                         attendance_mode = True
                         cached_user_id = data.get("userId")
-                        # Immediately clear status to prevent ghost trigger
                         db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
                             "scan_status": "idle",
                             "last_student_name": ""
@@ -308,12 +305,12 @@ def listen_commands():
                     
                     change.document.reference.update({"status": "done"})
 
-    # CRITICAL: Filter query by deviceId to save reads!
+    # CRITICAL: Filter by deviceId to avoid reading everyone's commands
     query = db.collection(COLLECTION_COMMANDS).where("deviceId", "==", DEVICE_SERIAL).where("status", "==", "pending")
     query.on_snapshot(on_snapshot)
 
 if __name__ == "__main__":
-    print("\n--- BioSync v13.0 (GHOST-KILLER EDITION) ---")
+    print("\n--- BioSync v13.2 (REMOTE-SYNC EDITION) ---")
     if setup_firebase():
         if setup_hardware():
             update_ui_status("IDLE")
