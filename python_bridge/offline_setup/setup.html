@@ -1,141 +1,91 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BioSync Setup Mode</title>
+    <title>BioSync Wi-Fi Setup</title>
     <style>
-        :root {
-            --primary: #3b82f6;
-            --bg: #020617;
-        }
-        body {
-            background-color: var(--bg);
-            color: white;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-            overflow: hidden;
-            text-align: center;
-            background-image: 
-                radial-gradient(at 0% 0%, hsla(217, 91%, 60%, 0.08) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, hsla(16, 100%, 50%, 0.04) 0px, transparent 50%);
-        }
-        .container {
-            padding: 50px;
-            border: 2px solid rgba(59, 130, 246, 0.2);
-            border-radius: 50px;
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(20px);
-            max-width: 85%;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        }
-        h1 {
-            font-size: 4.5rem;
-            margin: 0;
-            font-weight: 900;
-            font-style: italic;
-            text-transform: uppercase;
-            letter-spacing: -3px;
-        }
-        .highlight { color: var(--primary); }
-        .status-badge {
-            background: rgba(244, 63, 94, 0.1);
-            color: #fb7185;
-            padding: 8px 24px;
-            border-radius: 100px;
-            font-weight: 900;
-            font-size: 1.2rem;
-            border: 1px solid rgba(244, 63, 94, 0.2);
-            margin: 20px 0;
-            display: inline-block;
-            letter-spacing: 2px;
-        }
-        .qr-container {
-            width: 280px;
-            height: 280px;
-            background: white;
-            margin: 30px auto;
-            padding: 20px;
-            border-radius: 30px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            box-shadow: 0 0 40px rgba(59, 130, 246, 0.3);
-        }
-        .instruction-box {
-            background: rgba(59, 130, 246, 0.05);
-            padding: 25px 40px;
-            border-radius: 30px;
-            border: 1px solid rgba(59, 130, 246, 0.2);
-            margin-top: 30px;
-            text-align: left;
-        }
-        .step {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            margin: 15px 0;
-            font-weight: 700;
-            font-size: 1.3rem;
-        }
-        .step-num {
-            background: var(--primary);
-            color: white;
-            width: 35px;
-            height: 35px;
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.1rem;
-            flex-shrink: 0;
-        }
-        .blink { animation: blink 2s infinite; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-        
-        svg.qr-code {
-            width: 100%;
-            height: 100%;
-        }
+        :root { --primary: #3b82f6; --bg: #020617; }
+        body { background-color: var(--bg); color: white; font-family: sans-serif; margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center; }
+        .card { width: 100%; max-width: 400px; background: #0f172a; border: 1px solid #1e293b; border-radius: 24px; padding: 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+        h1 { font-style: italic; font-weight: 900; letter-spacing: -2px; margin-bottom: 5px; }
+        .wifi-list { margin-top: 20px; max-height: 300px; overflow-y: auto; }
+        .wifi-item { background: #1e293b; padding: 15px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; border: 1px solid transparent; transition: 0.2s; }
+        .wifi-item:hover { border-color: var(--primary); }
+        input { width: 100%; padding: 15px; background: #020617; border: 1px solid #1e293b; border-radius: 12px; color: white; margin-top: 15px; box-sizing: border-box; font-size: 16px; }
+        .btn { width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 12px; font-weight: bold; margin-top: 15px; cursor: pointer; }
+        .status { margin-top: 15px; text-align: center; color: var(--primary); font-size: 14px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>BioSync <span class="highlight">Box</span></h1>
-        <div class="status-badge">OFFLINE MODE</div>
+    <div class="card">
+        <h1>BioSync <span style="color: var(--primary)">Box</span></h1>
+        <p style="color: #64748b;">Select School/College Wi-Fi</p>
         
-        <p style="font-size: 1.4rem; color: #94a3b8; margin-top: 0;">Internet connection not detected.</p>
-
-        <div class="qr-container">
-            <!-- Professional SVG QR Code for SSID: BioSync_Setup (No Password) -->
-            <svg class="qr-code" viewBox="0 0 29 29" fill="none" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">
-                <path fill="#000" d="M0 0h7v7H0zM22 0h7v7h-7zM0 22h7v7H0zM2 2h3v3H2zM24 2h3v3h-3zM2 24h3v3H2zM10 0h1v1h-1zM12 0h2v1h-2zM15 0h1v1h-1zM17 0h4v1h-4zM10 2h1v1h-1zM13 2h1v1h-1zM15 2h1v1h-1zM17 2h1v1h-1zM19 2h2v1h-2zM10 3h1v1h-1zM12 3h1v1h-1zM14 3h1v1h-1zM16 3h1v1h-1zM18 3h1v1h-1zM20 3h1v1h-1zM10 4h1v1h-1zM12 4h1v1h-1zM14 4h1v1h-1zM16 4h1v1h-1zM18 4h1v1h-1zM20 4h1v1h-1zM10 6h1v1h-1zM13 6h1v1h-1zM15 6h1v1h-1zM17 6h1v1h-1zM19 6h2v1h-2zM8 0h1v1H8zM8 2h1v1H8zM8 4h1v1H8zM0 8h1v1H0zM2 8h1v1H2zM4 8h1v1H4zM6 8h1v1H6zM8 8h1v1H8zM10 8h1v1h-1zM12 8h1v1h-1zM14 8h1v1h-1zM16 8h1v1h-1zM18 8h1v1h-1zM20 8h1v1h-1zM22 8h1v1h-1zM24 8h1v1h-1zM26 8h1v1h-1zM28 8h1v1h-1zM0 10h1v1H0zM2 10h1v1H2zM4 10h1v1H4zM6 10h1v1H6zM8 10h1v1H8zM11 10h1v1h-1zM13 10h1v1h-1zM15 10h1v1h-1z|M17 10h1v1h-1zM19 10h1v1h-1zM21 10h1v1h-1zM23 10h1v1h-1zM25 10h1v1h-1zM27 10h1v1h-1zM0 12h1v1H0zM2 12h1v1H2zM4 12h1v1H4zM6 12h1v1H6zM8 12h1v1H8zM10 12h1v1h-1zM12 12h1v1h-1zM14 12h1v1h-1zM16 12h1v1h-1zM18 12h1v1h-1zM20 12h1v1h-1zM22 12h1v1h-1zM24 12h1v1h-1zM26 12h1v1h-1zM28 12h1v1h-1zM0 14h1v1H0zM2 14h1v1H2zM4 14h1v1H4zM6 14h1v1H6zM8 14h1v1H8zM11 14h1v1h-1zM13 14h1v1h-1zM15 14h1v1h-1zM17 14h1v1h-1zM19 14h1v1h-1zM21 14h1v1h-1zM23 14h1v1h-1zM25 14h1v1h-1zM27 14h1v1h-1zM0 16h1v1H0zM2 16h1v1H2zM4 16h1v1H4zM6 16h1v1H6zM8 16h1v1H8zM10 16h1v1h-1zM12 16h1v1h-1zM14 16h1v1h-1zM16 16h1v1h-1zM18 16h1v1h-1zM20 16h1v1h-1zM22 16h1v1h-1zM24 16h1v1h-1zM26 16h1v1h-1zM28 16h1v1h-1zM0 18h1v1H0zM2 18h1v1H2zM4 18h1v1H4zM6 18h1v1H6zM8 18h1v1H8zM11 18h1v1h-1zM13 18h1v1h-1zM15 18h1v1h-1zM17 18h1v1h-1zM19 18h1v1h-1zM21 18h1v1h-1zM23 18h1v1h-1zM25 18h1v1h-1zM27 18h1v1h-1zM0 20h1v1H0zM2 20h1v1H2zM4 20h1v1H4zM6 20h1v1H6zM8 20h1v1H8zM10 20h1v1h-1zM12 20h1v1h-1zM14 20h1v1h-1zM16 20h1v1h-1zM18 20h1v1h-1zM20 20h1v1h-1zM22 20h1v1h-1zM24 20h1v1h-1zM26 20h1v1h-1zM28 20h1v1h-1zM10 22h1v1h-1zM12 22h1v1h-1zM14 22h1v1h-1zM16 22h1v1h-1zM18 22h1v1h-1zM20 22h1v1h-1zM10 24h1v1h-1zM13 24h1v1h-1zM15 24h1v1h-1zM17 24h1v1h-1zM19 24h2v1h-2zM10 25h1v1h-1zM12 25h1v1h-1zM14 25h1v1h-1zM16 25h1v1h-1zM18 25h1v1h-1zM20 25h1v1h-1zM10 26h1v1h-1zM12 26h1v1h-1zM14 26h1v1h-1zM16 26h1v1h-1zM18 26h1v1h-1zM20 26h1v1h-1zM10 28h1v1h-1zM13 28h1v1h-1zM15 28h1v1h-1zM17 28h1v1h-1zM19 28h2v1h-2zM8 22h1v1H8zM8 24h1v1H8zM8 26h1v1H8zM8 28h1v1H8z"/>
-            </svg>
-        </div>
-
-        <div class="instruction-box">
-            <div class="step">
-                <div class="step-num">1</div> 
-                <span>Scan QR code to connect to <span class="highlight">BioSync_Setup</span></span>
-            </div>
-            <div class="step">
-                <div class="step-num">2</div> 
-                <span>Wait for the setup page to pop up on your phone</span>
-            </div>
-            <div class="step">
-                <div class="step-num">3</div> 
-                <span>Select school Wi-Fi and enter password</span>
+        <div id="list-view">
+            <div class="wifi-list" id="wifi-list">
+                <p>Scanning for networks...</p>
             </div>
         </div>
 
-        <p class="blink" style="font-size: 1.1rem; margin-top: 40px; color: var(--primary); font-weight: 900; text-transform: uppercase;">
-            Waiting for configuration...
-        </p>
+        <div id="pass-view" style="display: none;">
+            <p id="target-ssid" style="font-weight: bold; color: var(--primary);"></p>
+            <input type="password" id="wifi-pass" placeholder="Enter Wi-Fi Password">
+            <button class="btn" onclick="connect()">CONNECT NOW</button>
+            <button class="btn" style="background: transparent; border: 1px solid #1e293b;" onclick="showList()">BACK</button>
+        </div>
+
+        <div class="status" id="status"></div>
     </div>
+
+    <script>
+        let selectedSSID = "";
+
+        async function fetchWifi() {
+            try {
+                const res = await fetch('/api/wifi-list');
+                const list = await res.json();
+                const container = document.getElementById('wifi-list');
+                container.innerHTML = '';
+                if(list.length === 0) container.innerHTML = '<p>No networks found. Retrying...</p>';
+                list.forEach(n => {
+                    const div = document.createElement('div');
+                    div.className = 'wifi-item';
+                    div.innerHTML = `<span>${n.ssid}</span> <span style="opacity: 0.5">${n.signal}%</span>`;
+                    div.onclick = () => selectWifi(n.ssid);
+                    container.appendChild(div);
+                });
+            } catch(e) { console.log(e); }
+        }
+
+        function selectWifi(ssid) {
+            selectedSSID = ssid;
+            document.getElementById('list-view').style.display = 'none';
+            document.getElementById('pass-view').style.display = 'block';
+            document.getElementById('target-ssid').innerText = "Connecting to: " + ssid;
+        }
+
+        function showList() {
+            document.getElementById('list-view').style.display = 'block';
+            document.getElementById('pass-view').style.display = 'none';
+        }
+
+        async function connect() {
+            const pass = document.getElementById('wifi-pass').value;
+            if(!pass) return alert("Please enter password");
+            
+            document.getElementById('status').innerText = "Connecting... Box will reboot.";
+            try {
+                await fetch('/api/connect', {
+                    method: 'POST',
+                    body: JSON.stringify({ ssid: selectedSSID, password: pass })
+                });
+            } catch(e) {}
+        }
+
+        fetchWifi();
+        setInterval(fetchWifi, 10000);
+    </script>
 </body>
 </html>

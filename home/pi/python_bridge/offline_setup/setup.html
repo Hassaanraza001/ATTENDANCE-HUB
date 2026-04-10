@@ -1,0 +1,261 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BioSync Setup Console</title>
+    <style>
+        :root { --primary: #3b82f6; --bg: #020617; }
+        body { background-color: var(--bg); color: white; font-family: sans-serif; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; overflow: hidden; }
+        
+        /* Splash Screen Overlay */
+        #splash { position: fixed; inset: 0; background: var(--bg); z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: 0.5s ease-in-out; }
+        .logo-box { padding: 30px; background: #0f172a; border-radius: 30px; border: 2px solid rgba(59,130,246,0.2); box-shadow: 0 0 60px -20px rgba(59,130,246,0.5); margin-bottom: 20px; animation: bounce 2s infinite ease-in-out; }
+        .logo-box svg { width: 100px; height: 100px; fill: var(--primary); }
+        .splash-text { font-size: 3.5rem; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -2px; }
+        .loading-bar { width: 250px; height: 4px; background: rgba(255,255,255,0.05); border-radius: 10px; overflow: hidden; margin-top: 30px; }
+        .bar-inner { height: 100%; width: 0%; background: var(--primary); box-shadow: 0 0 20px var(--primary); transition: 0.1s; }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+
+        /* Main Setup Card */
+        .card { width: 92vw; max-width: 800px; background: #0f172a; border: 2px solid #1e293b; border-radius: 40px; padding: 25px; box-shadow: 0 40px 100px rgba(0,0,0,0.8); margin-top: 20px; opacity: 0; transition: 0.5s; display: none; box-sizing: border-box; }
+        .card.active { opacity: 1; display: block; }
+        
+        h1 { font-style: italic; font-weight: 900; letter-spacing: -2px; margin-bottom: 5px; text-transform: uppercase; font-size: 2.5rem; text-align: center; margin-top: 0; }
+        p.subtitle { text-align: center; color: #64748b; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: 4px; margin-bottom: 15px; }
+        
+        .wifi-list { margin-top: 10px; max-height: 250px; overflow-y: auto; border-radius: 20px; background: #020617; padding: 10px; }
+        .wifi-list::-webkit-scrollbar { width: 12px; }
+        .wifi-list::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; border: 3px solid #020617; }
+        
+        .wifi-item { background: #1e293b; padding: 18px; border-radius: 18px; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; border: 2px solid transparent; transition: 0.2s; align-items: center; }
+        .wifi-item:hover { border-color: var(--primary); }
+        .wifi-item span { font-size: 1.2rem; font-weight: bold; }
+        
+        /* Input Container */
+        .input-wrap { position: relative; margin-top: 15px; }
+        input { width: 100%; padding: 20px; background: #020617; border: 3px solid #1e293b; border-radius: 20px; color: white; box-sizing: border-box; font-size: 1.5rem; outline: none; text-align: center; font-weight: 900; cursor: pointer; }
+        input:focus { border-color: var(--primary); }
+        
+        .btn { width: 100%; padding: 18px; background: var(--primary); color: white; border: none; border-radius: 20px; font-weight: 900; margin-top: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px; font-size: 1.2rem; transition: 0.2s; }
+        .btn-ghost { background: transparent; border: 2px solid #1e293b; color: #64748b; margin-top: 10px; padding: 12px; font-size: 1rem; }
+        
+        /* Keyboard - Full Responsive Fix */
+        #keyboard { position: fixed; bottom: 10px; left: 1vw; right: 10px; background: #0f172a; padding: 10px; border-radius: 25px; border: 2px solid #1e293b; width: 98vw; display: none; box-sizing: border-box; z-index: 2000; }
+        .keyboard-row { display: flex; justify-content: center; margin-bottom: 6px; gap: 5px; }
+        .key { background: #1e293b; color: white; border: none; border-radius: 10px; height: 55px; flex: 1; font-size: 1.2rem; font-weight: bold; cursor: pointer; transition: 0.1s; display: flex; align-items: center; justify-content: center; }
+        .key:active { background: var(--primary); transform: scale(0.95); }
+        .key.wide { flex: 1.5; background: #334155; }
+        .key.extra-wide { flex: 4; }
+        .key.special { background: #3b82f6; }
+        .key.delete { background: #ef4444; }
+        
+        .status { margin-top: 10px; text-align: center; color: var(--primary); font-size: 1.2rem; font-weight: bold; }
+        .error-msg { color: #ef4444; margin-top: 10px; font-size: 1rem; text-align: center; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="splash">
+        <div class="logo-box">
+            <svg viewBox="0 0 24 24"><path d="M19 4h-3V2h-2v2h-4V2H8v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h5v2h-5zm0 4h5v2h-5z"/></svg>
+        </div>
+        <div class="splash-text">BioSync <span style="color:var(--primary)">Box</span></div>
+        <div class="loading-bar"><div class="bar-inner" id="bar"></div></div>
+        <p id="boot-msg" style="color:#64748b; font-weight:bold; margin-top:20px; letter-spacing:3px; text-transform: uppercase; font-size: 10px;">Checking Network Link...</p>
+    </div>
+
+    <div class="card" id="main-card">
+        <h1>BioSync <span style="color: var(--primary)">Box</span></h1>
+        <p class="subtitle">Institutional Setup Console</p>
+        
+        <div id="list-view">
+            <div class="wifi-list" id="wifi-list">
+                <p style="text-align: center; color: #475569; padding: 40px; font-size: 1.2rem;">Scanning for networks...</p>
+            </div>
+            <button class="btn btn-ghost" onclick="fetchWifi()">REFRESH NETWORK LIST</button>
+        </div>
+
+        <div id="pass-view" style="display: none;">
+            <p id="target-ssid" style="font-weight: 900; color: var(--primary); margin-bottom: 5px; font-size: 1.5rem; text-align: center;"></p>
+            <div class="input-wrap">
+                <input type="text" id="wifi-pass" placeholder="ENTER WI-FI PASSWORD" autocomplete="off" onfocus="showKeyboard()">
+            </div>
+            <button class="btn" id="connect-btn" onclick="connect()">SAVE & REBOOT BOX</button>
+            <button class="btn btn-ghost" onclick="showList()">CANCEL</button>
+        </div>
+
+        <div class="status" id="status"></div>
+        <div class="error-msg" id="error-msg"></div>
+    </div>
+
+    <div id="keyboard">
+        <div class="keyboard-row" id="row-1"></div>
+        <div class="keyboard-row" id="row-2"></div>
+        <div class="keyboard-row" id="row-3"></div>
+        <div class="keyboard-row" id="row-4"></div>
+        <div class="keyboard-row">
+            <button class="key wide special" onclick="toggleCaps()">CAPS</button>
+            <button class="key extra-wide" onclick="addKey(' ')">SPACE</button>
+            <button class="key wide delete" onclick="backspace()">BACK</button>
+            <button class="key wide special" onclick="hideKeyboard()">DONE</button>
+        </div>
+    </div>
+
+    <script>
+        const CLOUD_URL = "https://attendance-hub-dtja.vercel.app/kiosk?deviceId=10000000741245e8";
+        const bar = document.getElementById('bar');
+        const bootMsg = document.getElementById('boot-msg');
+        let progress = 0;
+
+        function updateProgress(val) {
+            bar.style.width = val + '%';
+        }
+
+        // Reliable internet check using image ping
+        async function checkInternet() {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const timer = setTimeout(() => {
+                    img.onload = img.onerror = null;
+                    resolve(false);
+                }, 4000);
+                img.onload = () => { clearTimeout(timer); resolve(true); };
+                img.onerror = () => { clearTimeout(timer); resolve(false); };
+                img.src = "https://www.google.com/favicon.ico?t=" + new Date().getTime();
+            });
+        }
+
+        async function initSystem() {
+            updateProgress(30);
+            const hasInternet = await checkInternet();
+            
+            if (hasInternet) {
+                bootMsg.innerText = "LINK ESTABLISHED. REDIRECTING...";
+                updateProgress(100);
+                setTimeout(() => {
+                    window.location.href = CLOUD_URL;
+                }, 500);
+            } else {
+                startOfflineMode();
+            }
+        }
+
+        function startOfflineMode() {
+            bootMsg.innerText = "OFFLINE. STARTING SETUP...";
+            const timer = setInterval(() => {
+                progress += 5;
+                if(progress > 100) progress = 100;
+                updateProgress(progress);
+                if(progress >= 100) {
+                    clearInterval(timer);
+                    document.getElementById('splash').style.opacity = '0';
+                    document.getElementById('main-card').classList.add('active');
+                    setTimeout(() => {
+                        document.getElementById('splash').style.display = 'none';
+                        fetchWifi();
+                    }, 500);
+                }
+            }, 30);
+        }
+
+        let selectedSSID = "";
+        let isCaps = false;
+        const passInput = document.getElementById('wifi-pass');
+        const keys = [
+            ["1","2","3","4","5","6","7","8","9","0","-","="],
+            ["q","w","e","r","t","y","u","i","o","p","[","]"],
+            ["a","s","d","f","g","h","j","k","l",";","'","\\"],
+            ["z","x","c","v","b","n","m",",",".","/","@","#"]
+        ];
+
+        function renderKeyboard() {
+            for(let i=0; i<4; i++) {
+                const row = document.getElementById(`row-${i+1}`);
+                row.innerHTML = "";
+                keys[i].forEach(k => {
+                    const char = isCaps ? k.toUpperCase() : k;
+                    const btn = document.createElement('button');
+                    btn.className = 'key';
+                    btn.innerText = char;
+                    btn.onclick = (e) => { e.preventDefault(); addKey(char); };
+                    row.appendChild(btn);
+                });
+            }
+        }
+
+        function addKey(k) { passInput.value += k; passInput.focus(); }
+        function backspace() { passInput.value = passInput.value.slice(0, -1); passInput.focus(); }
+        function toggleCaps() { isCaps = !isCaps; renderKeyboard(); }
+        function showKeyboard() { document.getElementById('keyboard').style.display = 'block'; }
+        function hideKeyboard() { document.getElementById('keyboard').style.display = 'none'; }
+
+        async function fetchWifi() {
+            const container = document.getElementById('wifi-list');
+            try {
+                const res = await fetch('/api/wifi-list');
+                const list = await res.json();
+                if (selectedSSID) return; 
+                container.innerHTML = '';
+                if(list.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #475569; padding: 40px;">No networks found. Retrying...</p>';
+                    return;
+                }
+                list.forEach(n => {
+                    const div = document.createElement('div');
+                    div.className = 'wifi-item';
+                    div.innerHTML = `<span>${n.ssid}</span> <span style="opacity: 0.5;">${n.signal}%</span>`;
+                    div.onclick = () => selectWifi(n.ssid);
+                    container.appendChild(div);
+                });
+            } catch(e) { console.log(e); }
+        }
+
+        function selectWifi(ssid) {
+            selectedSSID = ssid;
+            document.getElementById('list-view').style.display = 'none';
+            document.getElementById('pass-view').style.display = 'block';
+            document.getElementById('target-ssid').innerText = ssid;
+            document.getElementById('error-msg').innerText = "";
+            showKeyboard();
+        }
+
+        function showList() {
+            selectedSSID = "";
+            document.getElementById('list-view').style.display = 'block';
+            document.getElementById('pass-view').style.display = 'none';
+            hideKeyboard();
+        }
+
+        async function connect() {
+            const pass = passInput.value;
+            const btn = document.getElementById('connect-btn');
+            if(!pass) return;
+            btn.disabled = true;
+            btn.innerText = "AUTHENTICATING...";
+            try {
+                const res = await fetch('/api/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid: selectedSSID, password: pass })
+                });
+                if(res.status === 200) {
+                    document.getElementById('status').innerText = "SUCCESS! REBOOTING BOX...";
+                    btn.style.background = "#10b981";
+                    btn.innerText = "REBOOTING";
+                } else {
+                    btn.disabled = false;
+                    btn.innerText = "TRY AGAIN";
+                    document.getElementById('error-msg').innerText = "ERROR: Incorrect Password";
+                }
+            } catch(e) {
+                btn.disabled = false;
+                document.getElementById('error-msg').innerText = "Link Failed. Hardware Busy.";
+            }
+        }
+
+        renderKeyboard();
+        window.onload = initSystem;
+    </script>
+</body>
+</html>

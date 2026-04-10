@@ -1,51 +1,58 @@
-# 🌐 BioSync Box: Professional Auto-Hotspot Setup Guide
 
-Bhai, yeh guide aapke hardware box ko "Smart" banane ke liye hai. Agar school mein internet na ho, toh box apne aap screen par QR code dikhayega aur admin ke phone se Wi-Fi set ho jayega.
+# 🌐 BioSync Box: Smart Wi-Fi & Auto-Boot Troubleshooting
 
----
-
-### Step 1: Network Tools Install Karein
-Raspberry Pi terminal mein yeh likhein taaki Pi Wi-Fi ko control kar sake:
-```bash
-sudo apt update
-sudo apt install network-manager -y
-sudo systemctl enable --now NetworkManager
-```
-
-### Step 2: WiFi-Connect Engine Install Karein
-Yeh tool "Hotspot" banayega jab internet nahi milega:
-```bash
-curl -L https://github.com/balena-io/wifi-connect/raw/master/scripts/raspbian-install.sh | bash
-```
-
-### Step 3: Files ko Sahi Jagah Rakhein
-1. Raspberry Pi ki `/home/pi/` folder mein ek naya folder banayein: `offline_setup`.
-2. Uske andar hamari `setup.html` file copy kar dein.
-3. Usi folder mein `start_kiosk.sh` ko rakhein.
-4. Terminal mein yeh command chalayein taaki script "Execute" ho sake:
-```bash
-chmod +x /home/pi/offline_setup/start_kiosk.sh
-```
-
-### Step 4: Auto-Start Set Karein
-Humein Pi ko batana hai ki start hote hi hamara script chalana hai:
-1. Terminal mein likhein: `nano /home/pi/.config/lxsession/LXDE-pi/autostart`
-2. Sabse neeche yeh line jod dein:
-`@/home/pi/offline_setup/start_kiosk.sh`
-3. Save karne ke liye: `Ctrl+O` fir `Enter`, aur bahar aane ke liye `Ctrl+X`.
+Bhai, agar aapka box reboot hone par automatic nahi khul raha ya hotspot nahi dikha raha, toh niche diye gaye steps ko follow karein.
 
 ---
 
-### 💡 Yeh Kaam Kaise Karega?
-1. **Scenario A (Wi-Fi hai)**: Pi on hua -> Internet check kiya -> Success -> Seedha Vercel wali website khul gayi.
-2. **Scenario B (Wi-Fi nahi hai)**: Pi on hua -> Internet check kiya -> Fail -> Screen par QR Code dikha (`setup.html` se). 
-   - Admin ne phone se QR scan kiya.
-   - Phone par Wi-Fi list aayi, apna password dala.
-   - Box apne aap connect ho kar normal chalne laga.
+### 🛠️ Step 1: NetworkManager Enable Karein (Sabse Zaroori)
+Bullseye OS mein NetworkManager ko manually enable karna padta hai. Terminal mein yeh command chalayein:
+
+```bash
+# NetworkManager ko default banayein
+sudo raspi-config nonint do_netconf 2
+
+# Interface ko NetworkManager ke hawale karein
+sudo sed -i 's/managed=false/managed=true/g' /etc/NetworkManager/NetworkManager.conf
+
+# Service restart karein
+sudo systemctl restart NetworkManager
+```
 
 ---
 
-### 📡 QR Code Details:
-- **SSID**: `BioSync_Setup`
-- **Password**: None (Open)
-- **Function**: Phone connects to Pi automatically to open setup portal.
+### 🛠️ Step 2: Directory & Permissions Fix
+Confirm karein ki script ko chalne ki ijazat hai:
+
+```bash
+# Script ko executable banayein
+chmod +x /home/pi/python_bridge/offline_setup/start_kiosk.sh
+
+# Confirm karein ki autostart folder मौजूद hai
+mkdir -p /home/pi/.config/autostart
+```
+
+---
+
+### 🛠️ Step 3: Autostart Configuration
+Nayi file banayein ya purani ko edit karein:
+`nano /home/pi/.config/autostart/biosync.desktop`
+
+Usme yeh **EXACT** text hona chahiye:
+```text
+[Desktop Entry]
+Type=Application
+Name=BioSync
+Exec=/home/pi/python_bridge/offline_setup/start_kiosk.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true
+```
+
+---
+
+### 🔍 Zoom aur Hotspot Settings
+1.  **Zoom Level**: Maine ise **80%** (`scale-factor=0.8`) par set kar diya hai taaki UI badi aur saaf dikhe.
+2.  **Hotspot**: Hotspot ka naam **BioSync_Setup** hoga aur password **biosync123**. 
+3.  **Note**: Agar hotspot nahi dikhta, toh terminal mein `sudo nmcli con delete BioSync_Setup` chala kar reboot karein.
+
+Reboot karein aur 30 second wait karein. Ab hotspot pakka aayega!
