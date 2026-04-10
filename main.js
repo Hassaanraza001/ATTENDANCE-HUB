@@ -7,7 +7,7 @@ const { SerialPort } = require('serialport');
 const { ReadlineParser } = require('@serialport/parser-readline');
 
 // ======================= CONFIGURATION =======================
-const WEBSITE_URL = 'https://attendance-hub-alpha.vercel.app'; 
+const WEBSITE_URL = 'https://attendance-hub-dtja.vercel.app'; 
 // =============================================================
 
 let mainWindow;
