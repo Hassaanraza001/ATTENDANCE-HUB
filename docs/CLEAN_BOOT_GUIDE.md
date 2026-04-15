@@ -5,28 +5,31 @@ Bhai, is guide ko follow karne ke baad aapka Raspberry Pi bilkul ek factory-made
 
 ---
 
-### 🛠️ Step 1: Terminal mein Setup Commands
-Sabse pehle Raspberry Pi par terminal kholiye aur niche di gayi lines ko **ek-ek karke** copy-paste karke Enter dabayein:
+### 🛠️ Step 1: Duplicate Startup Entries Saaf Karein (Zaroori)
+Sabse pehle terminal mein yeh command chalayein taaki double start band ho jaye:
 
 ```bash
-# 1. Folder banayein (agar nahi hai) taaki error na aaye
+# Purani saari autostart settings saaf karein
+rm -f /home/pi/.config/autostart/biosync.desktop
 mkdir -p /home/pi/.config/lxsession/LXDE-pi
+cp /etc/xdg/lxsession/LXDE-pi/autostart /home/pi/.config/lxsession/LXDE-pi/autostart
+```
 
-# 2. Global settings ko local user settings mein copy karein
-cp /etc/xdg/lxsession/LXDE-pi/autostart /home/pi/.config/lxsession/LXDE-pi/autostart 2>/dev/null
+### 🛠️ Step 2: Taskbar aur Icons Disable Karein
+Terminal mein niche di gayi lines ko **ek-ek karke** copy-paste karke Enter dabayein:
 
-# 3. Taskbar (lxpanel) aur Desktop icons (pcmanfm) ko disable karein
+```bash
+# Taskbar (lxpanel) aur Desktop icons (pcmanfm) ko disable karein
 sed -i 's/^@lxpanel/#@lxpanel/' /home/pi/.config/lxsession/LXDE-pi/autostart
 sed -i 's/^@pcmanfm/#@pcmanfm/' /home/pi/.config/lxsession/LXDE-pi/autostart
 
-# 4. BioSync Launcher ko startup mein add karein
-# Note: Agar pehle se add hai, toh yeh line repeat nahi hogi
-grep -qxF "@/home/pi/python_bridge/offline_setup/start_kiosk.sh" /home/pi/.config/lxsession/LXDE-pi/autostart || echo "@/home/pi/python_bridge/offline_setup/start_kiosk.sh" >> /home/pi/.config/lxsession/LXDE-pi/autostart
+# BioSync Launcher ko startup mein add karein
+echo "@/home/pi/python_bridge/offline_setup/start_kiosk.sh" >> /home/pi/.config/lxsession/LXDE-pi/autostart
 ```
 
 ---
 
-### 🛠️ Step 2: Boot Codes ko Saaf Karein (Stealth Mode)
+### 🛠️ Step 3: Boot Codes ko Saaf Karein (Stealth Mode)
 Jab Pi chalu hota hai toh bahut saare codes (text) aate hain. Unhe hatane ke liye:
 
 1. Terminal mein likhein: `sudo nano /boot/cmdline.txt`
@@ -36,8 +39,7 @@ Jab Pi chalu hota hai toh bahut saare codes (text) aate hain. Unhe hatane ke liy
 
 ---
 
-### 🛠️ Step 3: Mouse Cursor Chhupayein
-Mouse ka teer (arrow) gayab karne ke liye `unclutter` install karein:
+### 🛠️ Step 4: Mouse Cursor Chhupayein
 1. Terminal mein: `sudo apt-get update && sudo apt-get install unclutter -y`
 2. Phir autostart mein add karein:
    `echo "@unclutter -idle 0.1 -root" >> /home/pi/.config/lxsession/LXDE-pi/autostart`
@@ -46,8 +48,8 @@ Mouse ka teer (arrow) gayab karne ke liye `unclutter` install karein:
 
 ### 💡 Result:
 Ab jab aap box on karenge:
-1. Ekdum black screen rahegi (no codes).
-2. Pehla jhatka hi **BioSync Box** ka logo aur loading animation hoga.
-3. Desktop ka taskbar, wallpaper, ya mouse teer kuch nahi dikhega.
+1. Ekdum black screen rahegi.
+2. Seedha **BioSync Logo** aur loading animation aayega.
+3. System **sirf ek baar** chalu hoga, jisne sensor ke errors khatam ho jayenge.
 
 **Ab `sudo reboot` karke jaadu dekhiye!**

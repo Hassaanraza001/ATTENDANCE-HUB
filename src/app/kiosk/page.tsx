@@ -23,7 +23,9 @@ import {
   Wifi,
   WifiOff,
   Zap,
-  Globe
+  Globe,
+  AlertCircle,
+  UserCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,7 +39,10 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
-  getDocs
+  getDocs,
+  query,
+  orderBy,
+  limit
 } from "firebase/firestore";
 
 const BootingScreen = () => {
@@ -68,7 +73,6 @@ const BootingScreen = () => {
 
   return (
     <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[200]">
-      {/* Background Glow */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/10 rounded-full blur-[120px] animate-pulse" />
       
       <div className="relative mb-12 flex flex-col items-center">
@@ -114,11 +118,11 @@ function KioskContent() {
   const [studentCount, setStudentCount] = useState(0);
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
-  const { toast } = useToast();
+  const [todayAttendance, setTodayAttendance] = useState<any[]>([]);
 
   useEffect(() => {
     const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
-    const bootTimer = setTimeout(() => setIsBooting(false), 5000); // 5s for professional splash feel
+    const bootTimer = setTimeout(() => setIsBooting(false), 5000);
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
   }, []);
 
@@ -169,31 +173,40 @@ function KioskContent() {
         return;
     }
 
-    if (systemStatus.enrollment_status && systemStatus.enrollment_status !== "IDLE" && view !== "enrollment-step") {
-        setView("enrollment-step");
-    }
-
-    if (view === "pairing" || view === "processing") setView("home");
-
-    if (systemStatus.enrollment_status === "SUCCESS" && view === "enrollment-step") {
-        setTimeout(() => setView("home"), 2500);
-    }
-
-    if ((view === "attendance") && systemStatus.scan_status === "success") {
-        setLastStudentName(systemStatus.last_student_name || "Unknown Student");
-        setView("success");
-        setTimeout(async () => {
-            const db = getDb();
-            await addDoc(collection(db, "kiosk_commands"), {
-                type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
-            });
-            await updateDoc(doc(db, "system_status", currentDeviceId), {
-                scan_status: "idle", last_student_name: ""
-            });
+    // CRITICAL FIX: Only interrupt the Home screen if the Controller is actually LIVE and status is fresh
+    if (isControllerAlive) {
+        // Enrollment View Logic
+        if (systemStatus.enrollment_status && systemStatus.enrollment_status !== "IDLE") {
+            if (view !== "enrollment-step") setView("enrollment-step");
+        } else if (view === "enrollment-step" && systemStatus.enrollment_status === "IDLE") {
             setView("home");
-        }, 3000);
+        }
+
+        // Scan Success Logic
+        if ((view === "attendance") && systemStatus.scan_status === "success") {
+            setLastStudentName(systemStatus.last_student_name || "Unknown Student");
+            setView("success");
+            setTimeout(async () => {
+                const db = getDb();
+                await updateDoc(doc(db, "system_status", currentDeviceId), {
+                    scan_status: "idle", last_student_name: ""
+                });
+                setView("home");
+            }, 3000);
+        }
+    } else {
+        // If controller is offline, we should mostly stay on Home or Pairing
+        if (view === "enrollment-step" || view === "success" || view === "processing" || view === "pairing") {
+            if (systemStatus.userId) setView("home");
+            else setView("pairing");
+        }
     }
-  }, [systemStatus, currentUserId, currentDeviceId, view]);
+
+    if (view === "pairing" || view === "processing") {
+        if (systemStatus.userId) setView("home");
+    }
+
+  }, [systemStatus, currentUserId, currentDeviceId, view, isControllerAlive]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -205,6 +218,10 @@ function KioskContent() {
         setStudentCount(snap.docs.length);
         const classes = Array.from(new Set(snap.docs.map(d => d.data().className).filter(c => !!c))).sort() as string[];
         setAvailableClasses(classes);
+
+        const today = format(new Date(), "yyyy-MM-dd");
+        const presentToday = studentsData.filter(s => s.attendance && s.attendance[today] === 'present');
+        setTodayAttendance(presentToday);
     });
   }, [currentUserId]);
 
@@ -226,6 +243,21 @@ function KioskContent() {
         });
     }
     setView("home");
+  };
+
+  const getEnrollmentDisplay = () => {
+    const status = systemStatus?.enrollment_status;
+    const name = systemStatus?.enrolling_student_name || "Student";
+    
+    switch(status) {
+      case "PLACE_FINGER": return { icon: <Fingerprint className="h-64 w-64 text-primary animate-pulse" />, title: "PLACE FINGER", sub: `Capturing biometric for ${name}`, color: "text-primary" };
+      case "REMOVE_FINGER": return { icon: <Activity className="h-64 w-64 text-orange-500 animate-bounce" />, title: "REMOVE FINGER", sub: "Lift your finger from sensor", color: "text-orange-500" };
+      case "PLACE_AGAIN": return { icon: <Fingerprint className="h-64 w-64 text-indigo-500 animate-pulse" />, title: "PLACE AGAIN", sub: "Verification scan in progress", color: "text-indigo-500" };
+      case "SUCCESS": return { icon: <CheckCircle2 className="h-64 w-64 text-emerald-500 animate-in zoom-in duration-500" />, title: "SUCCESS!", sub: `${name} is now enrolled`, color: "text-emerald-500" };
+      case "MATCH_ERROR": return { icon: <AlertCircle className="h-64 w-64 text-rose-500 animate-shake" />, title: "MISMATCH", sub: "Fingers did not match. Try again.", color: "text-rose-500" };
+      case "HARDWARE_ERROR": return { icon: <Cpu className="h-64 w-64 text-rose-500" />, title: "HW ERROR", sub: "Sensor timeout or busy", color: "text-rose-500" };
+      default: return { icon: <Loader2 className="h-64 w-64 text-primary animate-spin" />, title: "PROCESSING", sub: "Communicating with hardware...", color: "text-primary" };
+    }
   };
 
   if (isBooting) return <BootingScreen />;
@@ -254,7 +286,7 @@ function KioskContent() {
       </div>
 
       <div className="flex-1 relative flex flex-col items-center justify-center overflow-auto custom-scrollbar p-10">
-        {(view !== "home" && view !== "processing" && view !== "pairing") && (
+        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "enrollment-step") && (
           <button 
             onClick={handleBack} 
             className="absolute top-10 left-10 z-[160] h-32 px-16 bg-white/10 border-4 border-white/20 rounded-[3.5rem] flex items-center gap-8 text-white transition-all active:scale-90 shadow-[0_40px_100px_rgba(0,0,0,0.8)] backdrop-blur-3xl group"
@@ -321,6 +353,22 @@ function KioskContent() {
           </div>
         )}
 
+        {view === "enrollment-step" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-16">
+            <div className="relative bg-white/5 p-20 rounded-[5rem] border-4 border-white/10 shadow-2xl">
+                {getEnrollmentDisplay().icon}
+            </div>
+            <div className="space-y-6">
+              <h1 className={cn("text-[10rem] font-black italic uppercase tracking-tighter leading-none", getEnrollmentDisplay().color)}>
+                {getEnrollmentDisplay().title}
+              </h1>
+              <p className="text-4xl text-white/40 font-black uppercase tracking-[0.4em]">
+                {getEnrollmentDisplay().sub}
+              </p>
+            </div>
+          </div>
+        )}
+
         {view === "attendance" && (
           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20">
             <div className="relative bg-primary/10 p-40 rounded-full border-[30px] border-primary/20 shadow-[0_0_150px_-20px_rgba(59,130,246,0.4)]">
@@ -328,7 +376,7 @@ function KioskContent() {
                 <div className="absolute top-0 left-0 w-full h-3 bg-primary shadow-[0_0_100px_rgba(59,130,246,1)] animate-scan-line" />
             </div>
             <div className="space-y-4">
-              <h1 className="text-[10rem] font-black text-white italic uppercase tracking-tighter leading-none">Scan Finger</h1>
+              <h1 className="text-[10rem] font-black text-white italic uppercase tracking-tighter leading-none text-glow-white">Scan Finger</h1>
               <p className="text-4xl text-primary/60 font-black uppercase tracking-[0.5em]">Waiting for Biometric Input</p>
             </div>
           </div>
@@ -348,6 +396,51 @@ function KioskContent() {
           </div>
         )}
 
+        {view === "daily-report" && (
+          <div className="w-full max-w-[1600px] h-full flex flex-col gap-12 py-10">
+            <div className="flex justify-between items-end px-10">
+                <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter">Live <span className="text-indigo-500">Report</span></h2>
+                <div className="text-right">
+                    <p className="text-xl font-black text-white/30 uppercase tracking-widest">TOTAL PRESENT TODAY</p>
+                    <p className="text-7xl font-black text-indigo-500 italic">{todayAttendance.length}</p>
+                </div>
+            </div>
+            
+            <div className="flex-1 bg-slate-900/40 border-4 border-white/5 rounded-[5rem] overflow-hidden shadow-2xl">
+                <div className="h-full overflow-y-auto custom-scrollbar p-12">
+                    {todayAttendance.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-10">
+                            {todayAttendance.map((student, idx) => (
+                                <div key={student.id} className="bg-white/5 border-2 border-white/10 p-8 rounded-[3rem] flex items-center justify-between group hover:border-indigo-500/50 transition-all">
+                                    <div className="flex items-center gap-8">
+                                        <div className="h-20 w-20 rounded-2xl bg-indigo-500/10 flex items-center justify-center border-2 border-indigo-500/20 text-3xl font-black text-indigo-500 italic">
+                                            {idx + 1}
+                                        </div>
+                                        <div>
+                                            <p className="text-4xl font-black text-white italic uppercase tracking-tighter">{student.name}</p>
+                                            <p className="text-xl font-bold text-white/20 uppercase tracking-widest mt-1">{student.className}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col items-end">
+                                        <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+                                            <UserCheck className="h-8 w-8 text-emerald-500" />
+                                        </div>
+                                        <p className="text-xs font-black text-emerald-500/60 mt-3 uppercase tracking-widest">VERIFIED</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="h-full flex flex-col items-center justify-center space-y-8 opacity-20">
+                            <ClipboardList className="h-40 w-40" />
+                            <p className="text-5xl font-black uppercase tracking-[0.5em]">No Records Yet</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+          </div>
+        )}
+
         {view === "processing" && <div className="flex-1 flex flex-center justify-center"><Loader2 className="h-64 w-64 text-primary animate-spin" /></div>}
       </div>
 
@@ -356,6 +449,13 @@ function KioskContent() {
         .animate-scan-line { animation: scan-line 4s linear infinite; }
         .text-glow-white { text-shadow: 0 0 60px rgba(255,255,255,0.4); }
         
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-10px); }
+          75% { transform: translateX(10px); }
+        }
+        .animate-shake { animation: shake 0.5s ease-in-out infinite; }
+
         .custom-scrollbar::-webkit-scrollbar {
           width: 20px;
         }

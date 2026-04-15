@@ -25,13 +25,18 @@
         h1 { font-style: italic; font-weight: 900; letter-spacing: -2px; margin-bottom: 5px; text-transform: uppercase; font-size: 2.5rem; text-align: center; margin-top: 0; }
         p.subtitle { text-align: center; color: #64748b; font-weight: bold; font-size: 12px; text-transform: uppercase; letter-spacing: 4px; margin-bottom: 15px; }
         
-        .wifi-list { margin-top: 10px; max-height: 250px; overflow-y: auto; border-radius: 20px; background: #020617; padding: 10px; }
-        .wifi-list::-webkit-scrollbar { width: 12px; }
-        .wifi-list::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; border: 3px solid #020617; }
+        /* SCROLLBAR FIX */
+        .wifi-list { margin-top: 10px; max-height: 350px; overflow-y: scroll; border-radius: 20px; background: #020617; padding: 15px; border: 2px solid #1e293b; }
         
-        .wifi-item { background: #1e293b; padding: 18px; border-radius: 18px; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; border: 2px solid transparent; transition: 0.2s; align-items: center; }
-        .wifi-item:hover { border-color: var(--primary); }
-        .wifi-item span { font-size: 1.2rem; font-weight: bold; }
+        /* Mota and Touch Friendly Scrollbar */
+        .wifi-list::-webkit-scrollbar { width: 20px; }
+        .wifi-list::-webkit-scrollbar-track { background: #020617; border-radius: 10px; }
+        .wifi-list::-webkit-scrollbar-thumb { background: #3b82f6; border-radius: 10px; border: 4px solid #020617; }
+        .wifi-list::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+        
+        .wifi-item { background: #1e293b; padding: 22px; border-radius: 18px; margin-bottom: 10px; cursor: pointer; display: flex; justify-content: space-between; border: 2px solid transparent; transition: 0.2s; align-items: center; }
+        .wifi-item:hover { border-color: var(--primary); background: #1e293b; }
+        .wifi-item span { font-size: 1.4rem; font-weight: bold; }
         
         /* Input Container */
         .input-wrap { position: relative; margin-top: 15px; }
@@ -39,10 +44,11 @@
         input:focus { border-color: var(--primary); }
         
         .btn { width: 100%; padding: 18px; background: var(--primary); color: white; border: none; border-radius: 20px; font-weight: 900; margin-top: 15px; cursor: pointer; text-transform: uppercase; letter-spacing: 2px; font-size: 1.2rem; transition: 0.2s; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-ghost { background: transparent; border: 2px solid #1e293b; color: #64748b; margin-top: 10px; padding: 12px; font-size: 1rem; }
         
         /* Keyboard - Full Responsive Fix */
-        #keyboard { position: fixed; bottom: 10px; left: 1vw; right: 10px; background: #0f172a; padding: 10px; border-radius: 25px; border: 2px solid #1e293b; width: 98vw; display: none; box-sizing: border-box; z-index: 2000; }
+        #keyboard { position: fixed; bottom: 10px; left: 1vw; right: 10px; background: #0f172a; padding: 10px; border-radius: 25px; border: 2px solid #1e293b; width: 98vw; display: none; box-sizing: border-box; z-index: 2000; box-shadow: 0 -20px 50px rgba(0,0,0,0.5); }
         .keyboard-row { display: flex; justify-content: center; margin-bottom: 6px; gap: 5px; }
         .key { background: #1e293b; color: white; border: none; border-radius: 10px; height: 55px; flex: 1; font-size: 1.2rem; font-weight: bold; cursor: pointer; transition: 0.1s; display: flex; align-items: center; justify-content: center; }
         .key:active { background: var(--primary); transform: scale(0.95); }
@@ -73,7 +79,7 @@
             <div class="wifi-list" id="wifi-list">
                 <p style="text-align: center; color: #475569; padding: 40px; font-size: 1.2rem;">Scanning for networks...</p>
             </div>
-            <button class="btn btn-ghost" onclick="fetchWifi()">REFRESH NETWORK LIST</button>
+            <button class="btn btn-ghost" id="refresh-btn" onclick="fetchWifi()">REFRESH NETWORK LIST</button>
         </div>
 
         <div id="pass-view" style="display: none;">
@@ -103,23 +109,24 @@
     </div>
 
     <script>
+        // Redirect to cloud if online
         const CLOUD_URL = "https://attendance-hub-dtja.vercel.app/kiosk?deviceId=10000000741245e8";
         const bar = document.getElementById('bar');
         const bootMsg = document.getElementById('boot-msg');
+        const refreshBtn = document.getElementById('refresh-btn');
         let progress = 0;
 
         function updateProgress(val) {
             bar.style.width = val + '%';
         }
 
-        // Reliable internet check using image ping
         async function checkInternet() {
             return new Promise((resolve) => {
                 const img = new Image();
                 const timer = setTimeout(() => {
                     img.onload = img.onerror = null;
                     resolve(false);
-                }, 4000);
+                }, 3000);
                 img.onload = () => { clearTimeout(timer); resolve(true); };
                 img.onerror = () => { clearTimeout(timer); resolve(false); };
                 img.src = "https://www.google.com/favicon.ico?t=" + new Date().getTime();
@@ -192,23 +199,38 @@
 
         async function fetchWifi() {
             const container = document.getElementById('wifi-list');
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                refreshBtn.innerText = "SCANNING...";
+            }
+            container.innerHTML = '<p style="text-align: center; color: #475569; padding: 40px; font-size: 1.2rem;">Scanning for networks...</p>';
+            
             try {
                 const res = await fetch('/api/wifi-list');
                 const list = await res.json();
-                if (selectedSSID) return; 
+                
+                // Allow refresh even if SSID was previously selected (state reset)
                 container.innerHTML = '';
                 if(list.length === 0) {
                     container.innerHTML = '<p style="text-align: center; color: #475569; padding: 40px;">No networks found. Retrying...</p>';
-                    return;
+                } else {
+                    list.forEach(n => {
+                        const div = document.createElement('div');
+                        div.className = 'wifi-item';
+                        div.innerHTML = `<span>${n.ssid}</span> <span style="opacity: 0.5;">${n.signal}%</span>`;
+                        div.onclick = () => selectWifi(n.ssid);
+                        container.appendChild(div);
+                    });
                 }
-                list.forEach(n => {
-                    const div = document.createElement('div');
-                    div.className = 'wifi-item';
-                    div.innerHTML = `<span>${n.ssid}</span> <span style="opacity: 0.5;">${n.signal}%</span>`;
-                    div.onclick = () => selectWifi(n.ssid);
-                    container.appendChild(div);
-                });
-            } catch(e) { console.log(e); }
+            } catch(e) { 
+                console.log(e); 
+                container.innerHTML = '<p style="text-align: center; color: #ef4444; padding: 40px;">Hardware busy. Try again.</p>';
+            } finally {
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerText = "REFRESH NETWORK LIST";
+                }
+            }
         }
 
         function selectWifi(ssid) {

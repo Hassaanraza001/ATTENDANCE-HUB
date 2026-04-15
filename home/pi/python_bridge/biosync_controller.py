@@ -69,7 +69,6 @@ class CaptivePortalHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             try:
-                # Use sudo to avoid NetworkManager permission errors
                 cmd = "sudo nmcli -t -f SSID,SIGNAL dev wifi"
                 output = subprocess.check_output(cmd, shell=True, text=True)
                 networks = []
@@ -83,7 +82,7 @@ class CaptivePortalHandler(http.server.SimpleHTTPRequestHandler):
                                 networks.append({"ssid": ssid, "signal": sig})
                                 seen.add(ssid)
                 self.wfile.write(json.dumps(networks).encode())
-            except Exception as e:
+            except Exception:
                 self.wfile.write(json.dumps([]).encode())
         else: return super().do_GET()
 
@@ -96,7 +95,6 @@ class CaptivePortalHandler(http.server.SimpleHTTPRequestHandler):
             print(f"Attempting to connect to {ssid}...")
             
             try:
-                # Robust connection command
                 cmd = f"sudo nmcli dev wifi connect '{ssid}' password '{pwd}'"
                 result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=20)
                 
@@ -160,6 +158,13 @@ def setup_firebase():
                 cred = credentials.Certificate(key_path)
                 firebase_admin.initialize_app(cred)
             db = firestore.client()
+            
+            # Reset stale statuses on startup
+            db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
+                "enrollment_status": "IDLE",
+                "scan_status": "idle"
+            })
+            
             print("--- FIREBASE CONNECTED SUCCESSFULLY ---")
             return True
         except:
@@ -170,15 +175,17 @@ def setup_firebase():
 def setup_hardware():
     global finger, uart_port
     print("Connecting to Fingerprint Sensor...")
-    try:
-        if uart_port and uart_port.is_open: uart_port.close()
-        uart_port = serial.Serial("/dev/serial0", baudrate=57600, timeout=1)
-        finger = adafruit_fingerprint.Adafruit_Fingerprint(uart_port)
-        if finger.read_sysparam() == adafruit_fingerprint.OK:
-            print("--- SENSOR CONNECTED SUCCESSFULLY ---")
-            return True
-    except: pass
-    print("Sensor not found.")
+    for attempt in range(5):
+        try:
+            if uart_port and uart_port.is_open: uart_port.close()
+            uart_port = serial.Serial("/dev/serial0", baudrate=57600, timeout=1)
+            finger = adafruit_fingerprint.Adafruit_Fingerprint(uart_port)
+            if finger.read_sysparam() == adafruit_fingerprint.OK:
+                print(f"--- SENSOR CONNECTED SUCCESSFULLY (Attempt {attempt+1}) ---")
+                return True
+        except:
+            print(f"Sensor connection attempt {attempt+1} failed...")
+            time.sleep(2)
     return False
 
 def enroll(student_id, user_id, student_name):
@@ -186,6 +193,7 @@ def enroll(student_id, user_id, student_name):
     with sensor_lock:
         is_enrolling = True
         try:
+            uart_port.reset_input_buffer()
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "REMOVE_FINGER", "enrolling_student_name": student_name})
             while finger.get_image() != adafruit_fingerprint.NOFINGER: time.sleep(0.1)
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "PLACE_FINGER"})
@@ -205,7 +213,9 @@ def enroll(student_id, user_id, student_name):
                     db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "SUCCESS"})
                 else: db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "HARDWARE_ERROR"})
             else: db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "MATCH_ERROR"})
-        except: db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "ERROR_IMAGE"})
+        except Exception as e: 
+            print(f"Enroll Error: {e}")
+            db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "ERROR_IMAGE"})
         time.sleep(2)
         db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "IDLE"})
         is_enrolling = False
@@ -214,6 +224,7 @@ def sync_class(target_class, user_id):
     global slot_map, name_map
     with sensor_lock:
         try:
+            uart_port.reset_input_buffer()
             finger.empty_library()
             slot_map.clear()
             name_map.clear()
@@ -224,17 +235,21 @@ def sync_class(target_class, user_id):
                 file_path = os.path.join(TEMPLATES_DIR, f"{s_id}.dat")
                 if os.path.exists(file_path):
                     with open(file_path, "rb") as f: template = list(f.read()[:512])
+                    uart_port.reset_input_buffer()
                     finger.send_fpdata(template, "char", 1)
                     if finger.store_model(slot) == adafruit_fingerprint.OK:
                         slot_map[slot] = s_id
                         name_map[s_id] = doc.to_dict().get("name", "Unknown")
                         slot += 1
-        except: pass
+                        time.sleep(0.05)
+            print(f"Synced {slot-1} templates for {target_class}")
+        except Exception as e:
+            print(f"Sync Error: {e}")
 
 def attendance_loop():
     global attendance_mode, cached_user_id
     while True:
-        if not attendance_mode or is_enrolling:
+        if not attendance_mode or is_enrolling or finger is None:
             time.sleep(0.5)
             continue
         with sensor_lock:
@@ -250,7 +265,7 @@ def attendance_loop():
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "success", "last_student_name": student_name})
                                 time.sleep(4)
                                 db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"scan_status": "idle"})
-            except: pass
+            except Exception: pass
         time.sleep(0.1)
 
 def listen_commands():
@@ -265,7 +280,7 @@ def listen_commands():
                         threading.Thread(target=enroll, args=(data.get("studentId"), data.get("userId"), data.get("studentName"))).start()
                     elif t == "START_ATTENDANCE":
                         attendance_mode, cached_user_id = True, data.get("userId")
-                        sync_class(data.get("className"), cached_user_id)
+                        threading.Thread(target=sync_class, args=(data.get("className"), cached_user_id)).start()
                     elif t == "END_ATTENDANCE":
                         attendance_mode = False
                     elif t == "REBOOT":
@@ -275,7 +290,7 @@ def listen_commands():
                     elif t == "RESET_SENSOR":
                         with sensor_lock:
                             for f in glob.glob(os.path.join(TEMPLATES_DIR, "*.dat")): os.remove(f)
-                            finger.empty_library()
+                            if finger: finger.empty_library()
                             slot_map.clear()
                             name_map.clear()
                     change.document.reference.update({"status": "done"})
@@ -283,7 +298,7 @@ def listen_commands():
         db.collection(COLLECTION_COMMANDS).where("deviceId", "==", DEVICE_SERIAL).where("status", "==", "pending").on_snapshot(on_snapshot)
 
 if __name__ == "__main__":
-    print(f"--- BioSync Unified Controller v2.0 [ID: {DEVICE_SERIAL}] ---")
+    print(f"--- BioSync Unified Controller v2.3 [ID: {DEVICE_SERIAL}] ---")
     threading.Thread(target=run_wifi_server, daemon=True).start()
     
     setup_hardware()
