@@ -77,16 +77,39 @@ const BootingScreen = () => {
   }, []);
 
   return (
-    <div className="fixed inset-0 bg-[#020617] flex flex-col items-center justify-center z-[200]">
-      <div className="relative z-10 flex flex-col items-center scale-90 md:scale-100">
-        <div className="relative p-8 bg-slate-900/60 rounded-[2.5rem] border border-primary/20 shadow-[0_0_60px_-15px_rgba(59,130,246,0.5)] mb-8">
-          <Smartphone className="h-16 w-16 text-primary animate-pulse" />
+    <div className="fixed inset-0 w-screen h-screen bg-[#020617] flex flex-col items-center justify-center z-[9999] overflow-hidden">
+      {/* Background Glow */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-primary/20 rounded-full blur-[80px] animate-pulse" />
+      
+      <div className="relative z-10 flex flex-col items-center text-center px-6">
+        <div className="relative p-10 bg-slate-900/60 rounded-[3rem] border border-primary/20 shadow-[0_0_60px_-15px_rgba(59,130,246,0.5)] mb-10">
+          <Smartphone className="h-20 w-20 text-primary animate-pulse" />
+          <div className="absolute -bottom-2 -right-2 bg-emerald-500 p-2 rounded-xl shadow-lg border-2 border-[#020617]">
+             <Activity className="h-4 w-4 text-white animate-pulse" />
+          </div>
         </div>
-        <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase mb-2">
-          APP <span className="text-primary">SYNCING...</span>
-        </h1>
-        <div className="w-64 h-1.5 bg-white/5 rounded-full overflow-hidden border border-white/10 mt-6">
-          <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
+        
+        <div className="space-y-2 mb-10">
+          <h1 className="text-5xl font-black text-white italic tracking-tighter uppercase leading-none text-glow-white">
+            APP <span className="text-primary">SYNCING...</span>
+          </h1>
+          <p className="text-primary/40 font-mono text-[9px] tracking-[0.5em] uppercase font-bold">SECURE MOBILE NODE CONNECTED</p>
+        </div>
+
+        <div className="w-64 space-y-4">
+          <div className="relative h-2 w-full bg-white/5 rounded-full overflow-hidden border border-white/10 p-[1px]">
+            <div 
+              className="h-full bg-primary shadow-[0_0_15px_rgba(59,130,246,1)] transition-all duration-300 rounded-full" 
+              style={{ width: `${progress}%` }} 
+            />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-2 text-emerald-400 font-mono text-[10px] font-black italic">
+               <div className="h-1 w-1 rounded-full bg-emerald-500 animate-ping" />
+               SYSTEM INITIALIZED
+            </div>
+            <p className="text-white/20 text-[9px] font-black uppercase tracking-[0.3em]">{progress}% LOADED</p>
+          </div>
         </div>
       </div>
     </div>
@@ -245,7 +268,6 @@ export default function AndroidAppPage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-background pb-20">
-      {/* Mobile Header: NO BUTTONS HIDDEN */}
       <Header 
         userEmail={currentUser?.email} 
         userName={userProfile?.displayName} 
@@ -270,7 +292,6 @@ export default function AndroidAppPage() {
       
       <main className="flex-1 px-4 py-6 space-y-6">
         
-        {/* Status Line */}
         <div className="flex items-center gap-3 bg-slate-900/60 p-3 rounded-2xl border border-white/5 overflow-hidden">
             <Terminal className="h-3 w-3 text-primary animate-pulse shrink-0" />
             <div className="text-[10px] font-mono text-primary/60 truncate uppercase">
@@ -278,7 +299,6 @@ export default function AndroidAppPage() {
             </div>
         </div>
 
-        {/* Hero Section */}
         <div className="relative bg-slate-900/30 rounded-[2rem] border border-white/5 p-6 overflow-hidden">
           <div className="relative z-10 space-y-4">
             <div className="flex items-center gap-2 text-primary bg-primary/10 w-fit px-3 py-0.5 rounded-full border border-primary/20">
@@ -307,7 +327,6 @@ export default function AndroidAppPage() {
           </div>
         </div>
 
-        {/* Stats Grid */}
         <div className="grid grid-cols-1 gap-4">
           <Card className="glass-card p-6 flex items-center justify-between border-primary/20 bg-primary/5 rounded-3xl">
             <div className="space-y-1">
@@ -336,7 +355,6 @@ export default function AndroidAppPage() {
           </div>
         </div>
 
-        {/* Action Menu: Vertical Stack for Mobile */}
         <div className="space-y-4 pb-10">
           <h3 className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-500 ml-2">Console Access</h3>
           
@@ -395,7 +413,6 @@ export default function AndroidAppPage() {
         </div>
       </main>
 
-      {/* Dialogs reused from main page */}
       <Dialog open={isRosterDialogOpen} onOpenChange={setIsRosterDialogOpen}>
         <DialogContent className="max-w-full h-full flex flex-col p-0 overflow-hidden bg-slate-950 border-none rounded-none">
           <DialogHeader className="px-6 pt-16 pb-6 bg-slate-900/50 backdrop-blur-3xl shrink-0">
