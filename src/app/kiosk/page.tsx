@@ -126,7 +126,6 @@ function KioskContent() {
     const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
     const bootTimer = setTimeout(() => {
       setIsBooting(false);
-      // Wait another second before allowing status hijacking to let Python reset things
       setTimeout(() => { isInitialized.current = true; }, 1000);
     }, 5000);
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
@@ -152,8 +151,6 @@ function KioskContent() {
         const data = snap.data();
         setSystemStatus(data);
         if (data.userId) setCurrentUserId(data.userId);
-        
-        // Capture the very first status we see
         if (initialStatusRef.current === null) {
           initialStatusRef.current = data.enrollment_status || "IDLE";
         }
@@ -174,27 +171,34 @@ function KioskContent() {
     return (now - lastSeen) < 90000;
   }, [systemStatus]);
 
+  // AUTO-BACK FROM SUCCESS SCREEN
+  useEffect(() => {
+    if (view === "success" && currentDeviceId) {
+      const timer = setTimeout(async () => {
+        const db = getDb();
+        await updateDoc(doc(db, "system_status", currentDeviceId), {
+          scan_status: "idle", last_student_name: ""
+        });
+        setView("home");
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [view, currentDeviceId]);
+
   // MAIN NAVIGATION & HIJACKING LOGIC
   useEffect(() => {
     if (!systemStatus || !currentDeviceId || isBooting) return;
 
-    // Handle initial pairing/loading
     if (view === "processing" || view === "pairing") {
-        if (systemStatus.userId) {
-            setView("home");
-        } else {
-            setView("pairing");
-        }
+        if (systemStatus.userId) setView("home");
+        else setView("pairing");
         return;
     }
 
-    // HIJACKING LOGIC (Only after boot stabilization)
     if (isInitialized.current) {
-        
-        // 1. Enrollment Hijack (Only if it's a fresh command, not stale boot data)
+        // 1. Enrollment Hijack
         const currentEnrollStatus = systemStatus.enrollment_status || "IDLE";
         if (currentEnrollStatus !== "IDLE") {
-            // Only hijack if we are on Home or already in enrollment
             if (view === "home" || view === "enrollment-step") {
                 if (view !== "enrollment-step") setView("enrollment-step");
             }
@@ -206,16 +210,6 @@ function KioskContent() {
         if (view === "attendance" && systemStatus.scan_status === "success") {
             setLastStudentName(systemStatus.last_student_name || "Verified Student");
             setView("success");
-            
-            // Return to home after showing success for 4 seconds
-            const successTimer = setTimeout(async () => {
-                const db = getDb();
-                await updateDoc(doc(db, "system_status", currentDeviceId), {
-                    scan_status: "idle", last_student_name: ""
-                });
-                setView("home");
-            }, 4000);
-            return () => clearTimeout(successTimer);
         }
     }
   }, [systemStatus, view, currentDeviceId, isBooting]);
@@ -228,10 +222,8 @@ function KioskContent() {
     return onSnapshot(qStudents, (snap) => {
         const studentsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setAllStudents(studentsData);
-        
         const classes = Array.from(new Set(studentsData.map((s: any) => s.className).filter(c => !!c))).sort() as string[];
         setAvailableClasses(classes);
-
         const today = format(new Date(), "yyyy-MM-dd");
         const presentToday = studentsData.filter((s: any) => s.attendance && s.attendance[today] === 'present');
         setTodayAttendance(presentToday);
@@ -241,32 +233,29 @@ function KioskContent() {
   const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
     const db = getDb();
-    
-    // Clear any old scan states on hardware
     await updateDoc(doc(db, "system_status", currentDeviceId), { 
         scan_status: "idle", 
         last_student_name: "" 
     });
-
-    // Send command to Pi
     await addDoc(collection(db, "kiosk_commands"), {
-        type: "START_ATTENDANCE", 
-        deviceId: currentDeviceId, 
-        userId: currentUserId, 
-        className: className, 
-        status: "pending", 
-        createdAt: serverTimestamp()
+        type: "START_ATTENDANCE", deviceId: currentDeviceId, userId: currentUserId, className: className, status: "pending", createdAt: serverTimestamp()
     });
-    
     setView("attendance");
   };
 
   const handleBack = async () => {
-    if (view === "attendance" && currentDeviceId) {
+    if (currentDeviceId) {
         const db = getDb();
-        await addDoc(collection(db, "kiosk_commands"), {
-            type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
-        });
+        if (view === "attendance") {
+            await addDoc(collection(db, "kiosk_commands"), {
+                type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
+            });
+        }
+        if (view === "success") {
+            await updateDoc(doc(db, "system_status", currentDeviceId), {
+              scan_status: "idle", last_student_name: ""
+            });
+        }
     }
     setView("home");
   };
@@ -274,7 +263,6 @@ function KioskContent() {
   const getEnrollmentDisplay = () => {
     const status = systemStatus?.enrollment_status;
     const name = systemStatus?.enrolling_student_name || "Student";
-    
     switch(status) {
       case "PLACE_FINGER": return { icon: <Fingerprint className="h-64 w-64 text-primary animate-pulse" />, title: "PLACE FINGER", sub: `Capturing biometric for ${name}`, color: "text-primary" };
       case "REMOVE_FINGER": return { icon: <Activity className="h-64 w-64 text-orange-500 animate-bounce" />, title: "REMOVE FINGER", sub: "Lift your finger from sensor", color: "text-orange-500" };
@@ -290,7 +278,6 @@ function KioskContent() {
 
   return (
     <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950")}>
-      {/* Header */}
       <div className="h-32 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
         <div className="flex items-center gap-8">
             <div className="p-3 bg-primary/10 rounded-2xl border border-primary/20">
@@ -312,8 +299,7 @@ function KioskContent() {
       </div>
 
       <div className="flex-1 relative flex flex-col items-center justify-center overflow-auto custom-scrollbar p-10">
-        {/* Universal Back Button */}
-        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "enrollment-step" && view !== "success") && (
+        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "enrollment-step") && (
           <button 
             onClick={handleBack} 
             className="absolute top-10 left-10 z-[160] h-32 px-16 bg-white/10 border-4 border-white/20 rounded-[3.5rem] flex items-center gap-8 text-white transition-all active:scale-90 shadow-[0_40px_100px_rgba(0,0,0,0.8)] backdrop-blur-3xl group"
@@ -346,7 +332,6 @@ function KioskContent() {
                 <div className="text-[15rem] font-black text-white tracking-tighter italic leading-none text-glow-white">{format(currentTime, "HH:mm")}</div>
                 <div className="text-5xl font-bold text-primary uppercase tracking-[0.5em] mt-10">{format(currentTime, "EEEE, MMM do")}</div>
             </div>
-            
             <div className="flex gap-16 w-full max-w-[1600px] my-12">
                 <button onClick={() => setView("class-selection")} className="group relative flex-1 h-[450px] bg-slate-900/60 border-[6px] border-white/10 hover:border-primary/50 rounded-[5rem] flex flex-col items-center justify-center gap-10 transition-all active:scale-95 shadow-2xl">
                     <div className="p-10 bg-primary/10 rounded-[3rem] border-2 border-primary/20"><Fingerprint className="h-40 w-36 text-primary" /></div>
@@ -357,7 +342,6 @@ function KioskContent() {
                     <span className="text-7xl font-black text-white uppercase italic tracking-tighter">Live Report</span>
                 </button>
             </div>
-
             <div className="w-full max-w-[1600px] bg-slate-900/40 border-2 border-white/10 rounded-[4rem] p-12 grid grid-cols-3 gap-16">
                 <div className="flex items-center gap-8 border-r border-white/10"><Users className="h-16 w-16 text-primary" /><div className="flex flex-col"><span className="text-xl font-black text-white/30 uppercase tracking-widest">STUDENTS</span><span className="text-5xl font-bold text-white italic tracking-tighter">{allStudents.length}</span></div></div>
                 <div className="flex items-center gap-8 border-r border-white/10"><Database className="h-16 w-16 text-orange-500" /><div className="flex flex-col"><span className="text-xl font-black text-white/30 uppercase tracking-widest">STORAGE</span><span className="text-5xl font-bold text-white italic tracking-tighter">{systemStatus?.templates_stored || 0}</span></div></div>
@@ -439,7 +423,6 @@ function KioskContent() {
                     <p className="text-7xl font-black text-indigo-500 italic">{todayAttendance.length}</p>
                 </div>
             </div>
-            
             <div className="flex-1 bg-slate-900/40 border-4 border-white/5 rounded-[5rem] overflow-hidden shadow-2xl">
                 <div className="h-full overflow-y-auto custom-scrollbar p-12">
                     {todayAttendance.length > 0 ? (
@@ -474,7 +457,6 @@ function KioskContent() {
             </div>
           </div>
         )}
-
         {view === "processing" && <div className="flex-1 flex items-center justify-center"><Loader2 className="h-64 w-64 text-primary animate-spin" /></div>}
       </div>
 
@@ -482,28 +464,16 @@ function KioskContent() {
         @keyframes scan-line { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
         .animate-scan-line { animation: scan-line 4s linear infinite; }
         .text-glow-white { text-shadow: 0 0 60px rgba(255,255,255,0.4); }
-        
         @keyframes shake {
           0%, 100% { transform: translateX(0); }
           25% { transform: translateX(-10px); }
           75% { transform: translateX(10px); }
         }
         .animate-shake { animation: shake 0.5s ease-in-out infinite; }
-
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 20px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: #020617;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #1e293b;
-          border-radius: 10px;
-          border: 6px solid #020617;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #3b82f6;
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 20px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #020617; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; border: 6px solid #020617; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
       `}</style>
     </div>
   );
