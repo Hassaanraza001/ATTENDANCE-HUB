@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect, Suspense, useCallback, useMemo } from "react";
+import { useState, useEffect, Suspense, useCallback, useMemo, useRef } from "react";
 import { format } from "date-fns";
 import { useSearchParams } from "next/navigation";
 import { 
@@ -85,7 +85,7 @@ const BootingScreen = () => {
         <h1 className="text-8xl font-black text-white italic tracking-tighter uppercase mb-2 text-glow-white">
           BioSync <span className="text-primary">Box</span>
         </h1>
-        <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold">OS KERNEL v14.5.PRO</p>
+        <p className="text-primary/60 font-mono text-xl tracking-[0.8em] uppercase font-bold">OS KERNEL v14.8.PRO</p>
       </div>
 
       <div className="w-96 space-y-6">
@@ -115,14 +115,20 @@ function KioskContent() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [lastStudentName, setLastStudentName] = useState<string | null>(null);
-  const [studentCount, setStudentCount] = useState(0);
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
   const [todayAttendance, setTodayAttendance] = useState<any[]>([]);
+  
+  const isInitialized = useRef(false);
+  const initialStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
     const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
-    const bootTimer = setTimeout(() => setIsBooting(false), 5000);
+    const bootTimer = setTimeout(() => {
+      setIsBooting(false);
+      // Wait another second before allowing status hijacking to let Python reset things
+      setTimeout(() => { isInitialized.current = true; }, 1000);
+    }, 5000);
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
   }, []);
 
@@ -143,7 +149,14 @@ function KioskContent() {
     
     return onSnapshot(statusRef, (snap) => {
       if (snap.exists()) {
-        setSystemStatus(snap.data());
+        const data = snap.data();
+        setSystemStatus(data);
+        if (data.userId) setCurrentUserId(data.userId);
+        
+        // Capture the very first status we see
+        if (initialStatusRef.current === null) {
+          initialStatusRef.current = data.enrollment_status || "IDLE";
+        }
       } else {
         setDoc(statusRef, { 
             deviceId: currentDeviceId, pairing_token: Math.floor(100000 + Math.random() * 900000).toString(), 
@@ -161,53 +174,53 @@ function KioskContent() {
     return (now - lastSeen) < 90000;
   }, [systemStatus]);
 
+  // MAIN NAVIGATION & HIJACKING LOGIC
   useEffect(() => {
-    if (!systemStatus || !currentDeviceId) return;
+    if (!systemStatus || !currentDeviceId || isBooting) return;
 
-    if (systemStatus.userId && systemStatus.userId !== currentUserId) {
-        setCurrentUserId(systemStatus.userId);
-    }
-
-    if (!systemStatus.userId) {
-        if (view !== "pairing") setView("pairing");
+    // Handle initial pairing/loading
+    if (view === "processing" || view === "pairing") {
+        if (systemStatus.userId) {
+            setView("home");
+        } else {
+            setView("pairing");
+        }
         return;
     }
 
-    // CRITICAL FIX: Only interrupt the Home screen if the Controller is actually LIVE and status is fresh
-    if (isControllerAlive) {
-        // Enrollment View Logic
-        if (systemStatus.enrollment_status && systemStatus.enrollment_status !== "IDLE") {
-            if (view !== "enrollment-step") setView("enrollment-step");
-        } else if (view === "enrollment-step" && systemStatus.enrollment_status === "IDLE") {
+    // HIJACKING LOGIC (Only after boot stabilization)
+    if (isInitialized.current) {
+        
+        // 1. Enrollment Hijack (Only if it's a fresh command, not stale boot data)
+        const currentEnrollStatus = systemStatus.enrollment_status || "IDLE";
+        if (currentEnrollStatus !== "IDLE") {
+            // Only hijack if we are on Home or already in enrollment
+            if (view === "home" || view === "enrollment-step") {
+                if (view !== "enrollment-step") setView("enrollment-step");
+            }
+        } else if (view === "enrollment-step" && currentEnrollStatus === "IDLE") {
             setView("home");
         }
 
-        // Scan Success Logic
-        if ((view === "attendance") && systemStatus.scan_status === "success") {
-            setLastStudentName(systemStatus.last_student_name || "Unknown Student");
+        // 2. Success Hijack (During active attendance session)
+        if (view === "attendance" && systemStatus.scan_status === "success") {
+            setLastStudentName(systemStatus.last_student_name || "Verified Student");
             setView("success");
-            setTimeout(async () => {
+            
+            // Return to home after showing success for 4 seconds
+            const successTimer = setTimeout(async () => {
                 const db = getDb();
                 await updateDoc(doc(db, "system_status", currentDeviceId), {
                     scan_status: "idle", last_student_name: ""
                 });
                 setView("home");
-            }, 3000);
-        }
-    } else {
-        // If controller is offline, we should mostly stay on Home or Pairing
-        if (view === "enrollment-step" || view === "success" || view === "processing" || view === "pairing") {
-            if (systemStatus.userId) setView("home");
-            else setView("pairing");
+            }, 4000);
+            return () => clearTimeout(successTimer);
         }
     }
+  }, [systemStatus, view, currentDeviceId, isBooting]);
 
-    if (view === "pairing" || view === "processing") {
-        if (systemStatus.userId) setView("home");
-    }
-
-  }, [systemStatus, currentUserId, currentDeviceId, view, isControllerAlive]);
-
+  // DATA FETCHING (Students & Classes)
   useEffect(() => {
     if (!currentUserId) return;
     const db = getDb();
@@ -215,12 +228,12 @@ function KioskContent() {
     return onSnapshot(qStudents, (snap) => {
         const studentsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         setAllStudents(studentsData);
-        setStudentCount(snap.docs.length);
-        const classes = Array.from(new Set(snap.docs.map(d => d.data().className).filter(c => !!c))).sort() as string[];
+        
+        const classes = Array.from(new Set(studentsData.map((s: any) => s.className).filter(c => !!c))).sort() as string[];
         setAvailableClasses(classes);
 
         const today = format(new Date(), "yyyy-MM-dd");
-        const presentToday = studentsData.filter(s => s.attendance && s.attendance[today] === 'present');
+        const presentToday = studentsData.filter((s: any) => s.attendance && s.attendance[today] === 'present');
         setTodayAttendance(presentToday);
     });
   }, [currentUserId]);
@@ -228,15 +241,28 @@ function KioskContent() {
   const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
     const db = getDb();
-    await updateDoc(doc(db, "system_status", currentDeviceId), { scan_status: "idle", last_student_name: "" });
-    await addDoc(collection(db, "kiosk_commands"), {
-        type: "START_ATTENDANCE", deviceId: currentDeviceId, userId: currentUserId, className: className, status: "pending", createdAt: serverTimestamp()
+    
+    // Clear any old scan states on hardware
+    await updateDoc(doc(db, "system_status", currentDeviceId), { 
+        scan_status: "idle", 
+        last_student_name: "" 
     });
+
+    // Send command to Pi
+    await addDoc(collection(db, "kiosk_commands"), {
+        type: "START_ATTENDANCE", 
+        deviceId: currentDeviceId, 
+        userId: currentUserId, 
+        className: className, 
+        status: "pending", 
+        createdAt: serverTimestamp()
+    });
+    
     setView("attendance");
   };
 
   const handleBack = async () => {
-    if (currentDeviceId) {
+    if (view === "attendance" && currentDeviceId) {
         const db = getDb();
         await addDoc(collection(db, "kiosk_commands"), {
             type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
@@ -286,7 +312,8 @@ function KioskContent() {
       </div>
 
       <div className="flex-1 relative flex flex-col items-center justify-center overflow-auto custom-scrollbar p-10">
-        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "enrollment-step") && (
+        {/* Universal Back Button */}
+        {(view !== "home" && view !== "processing" && view !== "pairing" && view !== "enrollment-step" && view !== "success") && (
           <button 
             onClick={handleBack} 
             className="absolute top-10 left-10 z-[160] h-32 px-16 bg-white/10 border-4 border-white/20 rounded-[3.5rem] flex items-center gap-8 text-white transition-all active:scale-90 shadow-[0_40px_100px_rgba(0,0,0,0.8)] backdrop-blur-3xl group"
@@ -332,7 +359,7 @@ function KioskContent() {
             </div>
 
             <div className="w-full max-w-[1600px] bg-slate-900/40 border-2 border-white/10 rounded-[4rem] p-12 grid grid-cols-3 gap-16">
-                <div className="flex items-center gap-8 border-r border-white/10"><Users className="h-16 w-16 text-primary" /><div className="flex flex-col"><span className="text-xl font-black text-white/30 uppercase tracking-widest">STUDENTS</span><span className="text-5xl font-bold text-white italic tracking-tighter">{studentCount}</span></div></div>
+                <div className="flex items-center gap-8 border-r border-white/10"><Users className="h-16 w-16 text-primary" /><div className="flex flex-col"><span className="text-xl font-black text-white/30 uppercase tracking-widest">STUDENTS</span><span className="text-5xl font-bold text-white italic tracking-tighter">{allStudents.length}</span></div></div>
                 <div className="flex items-center gap-8 border-r border-white/10"><Database className="h-16 w-16 text-orange-500" /><div className="flex flex-col"><span className="text-xl font-black text-white/30 uppercase tracking-widest">STORAGE</span><span className="text-5xl font-bold text-white italic tracking-tighter">{systemStatus?.templates_stored || 0}</span></div></div>
                 <div className="flex items-center gap-8"><Cpu className="h-16 w-16 text-indigo-400" /><div className="flex flex-col"><span className="text-xl font-black text-white/30 uppercase tracking-widest">TEMP</span><span className="text-5xl font-bold text-white uppercase italic tracking-tighter">{systemStatus?.cpu_temp ? systemStatus.cpu_temp.toFixed(1) : "--"}°C</span></div></div>
             </div>
@@ -340,15 +367,22 @@ function KioskContent() {
         )}
 
         {view === "class-selection" && (
-          <div className="w-full max-w-[1600px] flex flex-col items-center gap-20 py-10 overflow-y-auto max-h-full">
+          <div className="w-full max-w-[1600px] flex flex-col items-center gap-20 py-10">
             <h2 className="text-8xl font-black text-white italic uppercase tracking-tighter">Select Class</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-12 w-full px-10">
-                {availableClasses.map((className) => (
-                    <button key={className} onClick={() => handleStartAttendance(className)} className="h-56 bg-slate-900/60 border-[6px] border-white/5 hover:border-primary rounded-[4rem] flex flex-col items-center justify-center gap-4 transition-all group shadow-[0_40px_80px_rgba(0,0,0,0.5)] active:scale-90">
-                        <BookOpen className="h-16 w-16 text-primary/40 group-hover:text-primary transition-colors" />
-                        <span className="text-6xl font-black text-white italic uppercase tracking-tighter">{className}</span>
-                    </button>
-                ))}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-12 w-full px-10 overflow-y-auto max-h-[700px] custom-scrollbar">
+                {availableClasses.length > 0 ? (
+                    availableClasses.map((className) => (
+                        <button key={className} onClick={() => handleStartAttendance(className)} className="h-56 bg-slate-900/60 border-[6px] border-white/5 hover:border-primary rounded-[4rem] flex flex-col items-center justify-center gap-4 transition-all group shadow-[0_40px_80px_rgba(0,0,0,0.5)] active:scale-90">
+                            <BookOpen className="h-16 w-16 text-primary/40 group-hover:text-primary transition-colors" />
+                            <span className="text-6xl font-black text-white italic uppercase tracking-tighter">{className}</span>
+                        </button>
+                    ))
+                ) : (
+                    <div className="col-span-full py-40 text-center opacity-30">
+                        <Users className="h-40 w-40 mx-auto mb-10" />
+                        <p className="text-5xl font-black uppercase tracking-[0.5em]">No Classes Configured</p>
+                    </div>
+                )}
             </div>
           </div>
         )}
@@ -383,7 +417,7 @@ function KioskContent() {
         )}
 
         {view === "success" && (
-          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20">
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20 animate-in fade-in duration-500">
             <div className="bg-emerald-500 p-32 rounded-full border-[30px] border-emerald-400/40 shadow-[0_0_150px_-20px_rgba(16,185,129,0.5)] animate-in zoom-in duration-500">
               <CheckCircle2 className="h-64 w-64 text-white" />
             </div>
@@ -441,7 +475,7 @@ function KioskContent() {
           </div>
         )}
 
-        {view === "processing" && <div className="flex-1 flex flex-center justify-center"><Loader2 className="h-64 w-64 text-primary animate-spin" /></div>}
+        {view === "processing" && <div className="flex-1 flex items-center justify-center"><Loader2 className="h-64 w-64 text-primary animate-spin" /></div>}
       </div>
 
       <style jsx global>{`

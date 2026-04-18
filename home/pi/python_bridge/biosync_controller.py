@@ -159,10 +159,11 @@ def setup_firebase():
                 firebase_admin.initialize_app(cred)
             db = firestore.client()
             
-            # Reset stale statuses on startup
+            # Reset stale statuses on startup - CRITICAL FIX
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({
                 "enrollment_status": "IDLE",
-                "scan_status": "idle"
+                "scan_status": "idle",
+                "enrolling_student_name": ""
             })
             
             print("--- FIREBASE CONNECTED SUCCESSFULLY ---")
@@ -192,18 +193,34 @@ def enroll(student_id, user_id, student_name):
     global is_enrolling
     with sensor_lock:
         is_enrolling = True
+        start_time = time.time()
         try:
             uart_port.reset_input_buffer()
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "REMOVE_FINGER", "enrolling_student_name": student_name})
-            while finger.get_image() != adafruit_fingerprint.NOFINGER: time.sleep(0.1)
+            
+            # Wait for finger removal with 30s timeout
+            while finger.get_image() != adafruit_fingerprint.NOFINGER: 
+                if time.time() - start_time > 30: raise Exception("Timeout")
+                time.sleep(0.1)
+                
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "PLACE_FINGER"})
-            while finger.get_image() != adafruit_fingerprint.OK: time.sleep(0.1)
+            while finger.get_image() != adafruit_fingerprint.OK: 
+                if time.time() - start_time > 45: raise Exception("Timeout")
+                time.sleep(0.1)
+            
             finger.image_2_tz(1)
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "REMOVE_FINGER"})
             time.sleep(1)
-            while finger.get_image() != adafruit_fingerprint.NOFINGER: time.sleep(0.1)
+            
+            while finger.get_image() != adafruit_fingerprint.NOFINGER: 
+                if time.time() - start_time > 60: raise Exception("Timeout")
+                time.sleep(0.1)
+                
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "PLACE_AGAIN"})
-            while finger.get_image() != adafruit_fingerprint.OK: time.sleep(0.1)
+            while finger.get_image() != adafruit_fingerprint.OK: 
+                if time.time() - start_time > 75: raise Exception("Timeout")
+                time.sleep(0.1)
+            
             finger.image_2_tz(2)
             if finger.create_model() == adafruit_fingerprint.OK:
                 data = finger.get_fpdata("char", 1)
@@ -216,6 +233,7 @@ def enroll(student_id, user_id, student_name):
         except Exception as e: 
             print(f"Enroll Error: {e}")
             db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "ERROR_IMAGE"})
+        
         time.sleep(2)
         db.collection(COLLECTION_STATUS).document(DEVICE_SERIAL).update({"enrollment_status": "IDLE"})
         is_enrolling = False
