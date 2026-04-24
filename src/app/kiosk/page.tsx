@@ -25,7 +25,9 @@ import {
   Zap,
   Globe,
   AlertCircle,
-  UserCheck
+  UserCheck,
+  XCircle,
+  Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -109,7 +111,7 @@ function KioskContent() {
   const urlDeviceId = searchParams.get("deviceId");
   
   const [isBooting, setIsBooting] = useState(true);
-  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "class-selection" | "daily-report">("processing");
+  const [view, setView] = useState<"pairing" | "home" | "attendance" | "registration" | "enrollment-step" | "success" | "processing" | "class-selection" | "daily-report" | "mismatch" | "already-present">("processing");
   const [currentTime, setCurrentTime] = useState(new Date());
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -120,13 +122,12 @@ function KioskContent() {
   const [todayAttendance, setTodayAttendance] = useState<any[]>([]);
   
   const isInitialized = useRef(false);
-  const initialStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
     const clockTimer = setInterval(() => setCurrentTime(new Date()), 1000);
     const bootTimer = setTimeout(() => {
       setIsBooting(false);
-      setTimeout(() => { isInitialized.current = true; }, 1000);
+      setTimeout(() => { isInitialized.current = true; }, 2000);
     }, 5000);
     return () => { clearInterval(clockTimer); clearTimeout(bootTimer); };
   }, []);
@@ -151,9 +152,6 @@ function KioskContent() {
         const data = snap.data();
         setSystemStatus(data);
         if (data.userId) setCurrentUserId(data.userId);
-        if (initialStatusRef.current === null) {
-          initialStatusRef.current = data.enrollment_status || "IDLE";
-        }
       } else {
         setDoc(statusRef, { 
             deviceId: currentDeviceId, pairing_token: Math.floor(100000 + Math.random() * 900000).toString(), 
@@ -171,9 +169,9 @@ function KioskContent() {
     return (now - lastSeen) < 90000;
   }, [systemStatus]);
 
-  // AUTO-BACK FROM SUCCESS SCREEN
+  // AUTO-BACK TIMERS
   useEffect(() => {
-    if (view === "success" && currentDeviceId) {
+    if ((view === "success" || view === "mismatch" || view === "already-present") && currentDeviceId) {
       const timer = setTimeout(async () => {
         const db = getDb();
         await updateDoc(doc(db, "system_status", currentDeviceId), {
@@ -185,36 +183,35 @@ function KioskContent() {
     }
   }, [view, currentDeviceId]);
 
-  // MAIN NAVIGATION & HIJACKING LOGIC
+  // NAVIGATION LOGIC
   useEffect(() => {
     if (!systemStatus || !currentDeviceId || isBooting) return;
 
-    if (view === "processing" || view === "pairing") {
+    if (!isInitialized.current) {
         if (systemStatus.userId) setView("home");
         else setView("pairing");
         return;
     }
 
-    if (isInitialized.current) {
-        // 1. Enrollment Hijack
-        const currentEnrollStatus = systemStatus.enrollment_status || "IDLE";
-        if (currentEnrollStatus !== "IDLE") {
-            if (view === "home" || view === "enrollment-step") {
-                if (view !== "enrollment-step") setView("enrollment-step");
-            }
-        } else if (view === "enrollment-step" && currentEnrollStatus === "IDLE") {
-            setView("home");
-        }
+    if (systemStatus.enrollment_status !== "IDLE" && (view === "home" || view === "enrollment-step")) {
+        setView("enrollment-step");
+    } else if (view === "enrollment-step" && systemStatus.enrollment_status === "IDLE") {
+        setView("home");
+    }
 
-        // 2. Success Hijack (During active attendance session)
-        if (view === "attendance" && systemStatus.scan_status === "success") {
+    if (view === "attendance") {
+        if (systemStatus.scan_status === "success") {
             setLastStudentName(systemStatus.last_student_name || "Verified Student");
             setView("success");
+        } else if (systemStatus.scan_status === "already-present") {
+            setLastStudentName(systemStatus.last_student_name || "Student");
+            setView("already-present");
+        } else if (systemStatus.scan_status === "mismatch") {
+            setView("mismatch");
         }
     }
   }, [systemStatus, view, currentDeviceId, isBooting]);
 
-  // DATA FETCHING (Students & Classes)
   useEffect(() => {
     if (!currentUserId) return;
     const db = getDb();
@@ -233,10 +230,7 @@ function KioskContent() {
   const handleStartAttendance = async (className: string) => {
     if (!currentDeviceId || !currentUserId) return;
     const db = getDb();
-    await updateDoc(doc(db, "system_status", currentDeviceId), { 
-        scan_status: "idle", 
-        last_student_name: "" 
-    });
+    await updateDoc(doc(db, "system_status", currentDeviceId), { scan_status: "idle", last_student_name: "" });
     await addDoc(collection(db, "kiosk_commands"), {
         type: "START_ATTENDANCE", deviceId: currentDeviceId, userId: currentUserId, className: className, status: "pending", createdAt: serverTimestamp()
     });
@@ -251,11 +245,7 @@ function KioskContent() {
                 type: "END_ATTENDANCE", deviceId: currentDeviceId, status: "pending", createdAt: serverTimestamp()
             });
         }
-        if (view === "success") {
-            await updateDoc(doc(db, "system_status", currentDeviceId), {
-              scan_status: "idle", last_student_name: ""
-            });
-        }
+        await updateDoc(doc(db, "system_status", currentDeviceId), { scan_status: "idle", last_student_name: "" });
     }
     setView("home");
   };
@@ -264,12 +254,19 @@ function KioskContent() {
     const status = systemStatus?.enrollment_status;
     const name = systemStatus?.enrolling_student_name || "Student";
     switch(status) {
-      case "PLACE_FINGER": return { icon: <Fingerprint className="h-64 w-64 text-primary animate-pulse" />, title: "PLACE FINGER", sub: `Capturing biometric for ${name}`, color: "text-primary" };
-      case "REMOVE_FINGER": return { icon: <Activity className="h-64 w-64 text-orange-500 animate-bounce" />, title: "REMOVE FINGER", sub: "Lift your finger from sensor", color: "text-orange-500" };
-      case "PLACE_AGAIN": return { icon: <Fingerprint className="h-64 w-64 text-indigo-500 animate-pulse" />, title: "PLACE AGAIN", sub: "Verification scan in progress", color: "text-indigo-500" };
-      case "SUCCESS": return { icon: <CheckCircle2 className="h-64 w-64 text-emerald-500 animate-in zoom-in duration-500" />, title: "SUCCESS!", sub: `${name} is now enrolled`, color: "text-emerald-500" };
-      case "MATCH_ERROR": return { icon: <AlertCircle className="h-64 w-64 text-rose-500 animate-shake" />, title: "MISMATCH", sub: "Fingers did not match. Try again.", color: "text-rose-500" };
-      case "HARDWARE_ERROR": return { icon: <Cpu className="h-64 w-64 text-rose-500" />, title: "HW ERROR", sub: "Sensor timeout or busy", color: "text-rose-500" };
+      case "PLACE_F1": return { icon: <Fingerprint className="h-64 w-64 text-primary animate-pulse" />, title: "FINGER 1", sub: `Capturing Finger 1 for ${name}`, color: "text-primary" };
+      case "REMOVE_F1": return { icon: <Activity className="h-64 w-64 text-orange-500 animate-bounce" />, title: "REMOVE", sub: "Lift your first finger", color: "text-orange-500" };
+      case "AGAIN_F1": return { icon: <Fingerprint className="h-64 w-64 text-indigo-500 animate-pulse" />, title: "AGAIN", sub: "Scan Finger 1 one more time", color: "text-indigo-500" };
+      
+      case "WAIT_F2": return { icon: <Users className="h-64 w-64 text-yellow-500 animate-pulse" />, title: "NEXT FINGER", sub: "Prepare your second finger", color: "text-yellow-500" };
+      
+      case "PLACE_F2": return { icon: <Fingerprint className="h-64 w-64 text-emerald-400 animate-pulse" />, title: "FINGER 2", sub: `Capturing Finger 2 for ${name}`, color: "text-emerald-400" };
+      case "REMOVE_F2": return { icon: <Activity className="h-64 w-64 text-orange-500 animate-bounce" />, title: "REMOVE", sub: "Lift your second finger", color: "text-orange-500" };
+      case "AGAIN_F2": return { icon: <Fingerprint className="h-64 w-64 text-indigo-500 animate-pulse" />, title: "AGAIN", sub: "Scan Finger 2 one more time", color: "text-indigo-500" };
+      
+      case "SUCCESS": return { icon: <CheckCircle2 className="h-64 w-64 text-emerald-500 animate-in zoom-in duration-500" />, title: "SUCCESS!", sub: `Dual registration complete for ${name}`, color: "text-emerald-500" };
+      case "ERROR_F1_FAIL": return { icon: <AlertCircle className="h-64 w-64 text-rose-500" />, title: "F1 FAILED", sub: "First finger failed. Retry.", color: "text-rose-500" };
+      case "ERROR_F2_FAIL": return { icon: <AlertCircle className="h-64 w-64 text-rose-500" />, title: "F2 FAILED", sub: "Second finger failed. Retry.", color: "text-rose-500" };
       default: return { icon: <Loader2 className="h-64 w-64 text-primary animate-spin" />, title: "PROCESSING", sub: "Communicating with hardware...", color: "text-primary" };
     }
   };
@@ -277,7 +274,7 @@ function KioskContent() {
   if (isBooting) return <BootingScreen />;
 
   return (
-    <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950")}>
+    <div className={cn("fixed inset-0 flex flex-col bg-[#020617] transition-all duration-700 overflow-hidden select-none", view === "success" && "bg-emerald-950", view === "mismatch" && "bg-rose-950", view === "already-present" && "bg-amber-950")}>
       <div className="h-32 px-12 flex justify-between items-center bg-slate-900/95 border-b border-white/10 backdrop-blur-3xl z-[100] shrink-0">
         <div className="flex items-center gap-8">
             <div className="p-3 bg-primary/10 rounded-2xl border border-primary/20">
@@ -395,7 +392,7 @@ function KioskContent() {
             </div>
             <div className="space-y-4">
               <h1 className="text-[10rem] font-black text-white italic uppercase tracking-tighter leading-none text-glow-white">Scan Finger</h1>
-              <p className="text-4xl text-primary/60 font-black uppercase tracking-[0.5em]">Waiting for Biometric Input</p>
+              <p className="text-4xl text-primary/60 font-black uppercase tracking-[0.5em]">Fast Recognition Active</p>
             </div>
           </div>
         )}
@@ -410,6 +407,33 @@ function KioskContent() {
                 <div className="bg-emerald-500/10 px-16 py-6 rounded-[3rem] border-4 border-emerald-500/30">
                   <p className="text-7xl text-emerald-300 font-black uppercase tracking-widest">{lastStudentName}</p>
                 </div>
+            </div>
+          </div>
+        )}
+
+        {view === "already-present" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20 animate-in fade-in duration-500">
+            <div className="bg-amber-500 p-32 rounded-full border-[30px] border-amber-400/40 shadow-[0_0_150px_-20px_rgba(245,158,11,0.5)] animate-in zoom-in duration-500">
+              <AlertCircle className="h-64 w-64 text-white" />
+            </div>
+            <div className="space-y-10">
+                <h2 className="text-[10rem] font-black text-white italic tracking-tighter uppercase leading-none">ALREADY MARKED</h2>
+                <div className="bg-amber-500/10 px-16 py-6 rounded-[3rem] border-4 border-amber-500/30">
+                  <p className="text-6xl text-amber-300 font-black uppercase tracking-widest">{lastStudentName} is already Present</p>
+                </div>
+                <p className="text-4xl text-amber-200/40 font-black uppercase tracking-[0.3em]">RE-SCAN NOT REQUIRED</p>
+            </div>
+          </div>
+        )}
+
+        {view === "mismatch" && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-20 animate-in fade-in duration-500">
+            <div className="bg-rose-500 p-32 rounded-full border-[30px] border-rose-400/40 shadow-[0_0_150px_-20px_rgba(244,63,94,0.5)] animate-shake">
+              <XCircle className="h-64 w-64 text-white" />
+            </div>
+            <div className="space-y-10">
+                <h2 className="text-[10rem] font-black text-white italic tracking-tighter uppercase leading-none">MISMATCH</h2>
+                <p className="text-4xl text-rose-300 font-black uppercase tracking-[0.3em]">FINGER NOT RECOGNIZED</p>
             </div>
           </div>
         )}

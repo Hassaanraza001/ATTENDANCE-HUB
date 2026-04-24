@@ -1,8 +1,9 @@
+
 "use client";
 
 import * as React from "react";
 import type { Student } from "@/lib/types";
-import { format, eachDayOfInterval, startOfDay, startOfMonth, endOfMonth, getYear, parseISO } from "date-fns";
+import { format, eachDayOfInterval, startOfDay, startOfMonth, endOfMonth, getYear, parseISO, getDaysInMonth } from "date-fns";
 import { DateRange } from "react-day-picker";
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
@@ -38,20 +39,45 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarIcon, FileSpreadsheet, FileText, Users, CheckCircle, XCircle, TrendingUp, User, PieChart as PieIcon, BarChart3, Search, CalendarDays, ChevronLeft, Zap } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { 
+  Calendar as CalendarIcon, 
+  FileSpreadsheet, 
+  FileText, 
+  Users, 
+  CheckCircle, 
+  XCircle, 
+  TrendingUp, 
+  User, 
+  PieChart as PieIcon, 
+  BarChart3, 
+  Search, 
+  CalendarDays, 
+  ChevronLeft, 
+  Zap, 
+  BookMarked, 
+  Download, 
+  History,
+  SearchCode,
+  CheckCircle2,
+  ArrowRight,
+  Filter
+} from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
 
 type AttendanceReportDialogProps = {
   students: Student[];
   classNames: string[];
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+  onStudentSelect?: (student: Student) => void;
 };
 
 type ReportData = {
@@ -85,33 +111,35 @@ export function AttendanceReportDialog({
   classNames,
   isOpen,
   onOpenChange,
+  onStudentSelect
 }: AttendanceReportDialogProps) {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = React.useState("class-view");
   const [reportType, setReportType] = React.useState("range");
-  const [selectedClass, setSelectedClass] = React.useState<string | null>(null);
+  const [selectedClass, setSelectedClass] = React.useState<string | null>("All");
   const [selectedStudentId, setSelectedStudentId] = React.useState<string | null>(null);
   const [reportData, setReportData] = React.useState<ReportData | null>(null);
   const [totalWorkingDays, setTotalWorkingDays] = React.useState<number>(0);
   const [studentSearchQuery, setStudentSearchQuery] = React.useState("");
   
+  // History Audit States
+  const [auditDate, setAuditDate] = React.useState<Date | undefined>(new Date());
+  const [auditSearchQuery, setAuditSearchQuery] = React.useState("");
+  const [auditStatusFilter, setAuditStatusFilter] = React.useState<string>("all");
+
   const [dateRange, setDateRange] = React.useState<DateRange | undefined>();
   const [selectedYear, setSelectedYear] = React.useState<number | null>(getYear(new Date()));
   const [selectedMonth, setSelectedMonth] = React.useState<number | null>(new Date().getMonth());
-
-  const handleBack = () => {
-    if (activeTab === "student-view") {
-      setActiveTab("class-view");
-    } else {
-      onOpenChange(false);
-    }
-  };
 
   const handleGenerateReport = () => {
     if (!selectedClass) return;
 
     let range: DateRange | undefined;
     if (reportType === 'range') {
-        if (!dateRange?.from || !dateRange.to) return;
+        if (!dateRange?.from || !dateRange.to) {
+          toast({ title: "Select Date Range", variant: "destructive" });
+          return;
+        }
         range = dateRange;
     } else {
         if (selectedYear === null || selectedMonth === null) return;
@@ -163,6 +191,52 @@ export function AttendanceReportDialog({
     });
 
     setReportData(report.sort((a, b) => a.rollNo - b.rollNo));
+  };
+
+  const exportRegisterToExcel = () => {
+    if (!selectedClass || selectedYear === null || selectedMonth === null) {
+        toast({ variant: "destructive", title: "Missing Parameters", description: "Please select class, month and year." });
+        return;
+    }
+
+    const monthDate = new Date(selectedYear, selectedMonth);
+    const daysInMonth = getDaysInMonth(monthDate);
+    const classStudents = students.filter((s) => s.className === selectedClass || selectedClass === "All")
+                            .sort((a, b) => a.rollNo - b.rollNo);
+    
+    if (classStudents.length === 0) {
+        toast({ variant: "destructive", title: "No Data", description: "No students found in the selected class." });
+        return;
+    }
+
+    const excelData = classStudents.map(student => {
+        const row: any = {
+            'Roll No': student.rollNo,
+            'Name': student.name,
+            'Class': student.className
+        };
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateKey = format(new Date(selectedYear, selectedMonth, d), "yyyy-MM-dd");
+            const status = student.attendance?.[dateKey];
+            row[`Day ${d}`] = status === 'present' ? 'P' : (status === 'absent' ? 'A' : '-');
+        }
+
+        const presentCount = Object.entries(student.attendance || {}).filter(([k, v]) => {
+            const d = parseISO(k);
+            return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear && v === 'present';
+        }).length;
+
+        row['Total Present'] = presentCount;
+        return row;
+    });
+
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Monthly Register");
+    XLSX.writeFile(wb, `Register_${selectedClass}_${MONTHS[selectedMonth]}_${selectedYear}.xlsx`);
+    
+    toast({ title: "Register Exported", description: `Full month grid for ${MONTHS[selectedMonth]} has been downloaded.` });
   };
 
   const summaryStats = React.useMemo(() => {
@@ -284,7 +358,7 @@ export function AttendanceReportDialog({
   const studentChartData = React.useMemo(() => {
     if (!selectedStudent) return [];
     const monthlyStats: Record<string, { name: string; present: number; absent: number }> = {};
-    Object.entries(selectedStudent.attendance).forEach(([date, status]) => {
+    Object.entries(selectedStudent.attendance || {}).forEach(([date, status]) => {
       const monthLabel = format(parseISO(date), "MMM yy");
       if (!monthlyStats[monthLabel]) monthlyStats[monthLabel] = { name: monthLabel, present: 0, absent: 0 };
       if (status === 'present') monthlyStats[monthLabel].present++;
@@ -296,7 +370,7 @@ export function AttendanceReportDialog({
   const studentPieData = React.useMemo(() => {
     if (!selectedStudent) return [];
     let present = 0, absent = 0;
-    Object.values(selectedStudent.attendance).forEach(v => {
+    Object.values(selectedStudent.attendance || {}).forEach(v => {
       if (v === 'present') present++;
       else if (v === 'absent') absent++;
     });
@@ -306,14 +380,48 @@ export function AttendanceReportDialog({
     ];
   }, [selectedStudent]);
 
+  // History Audit Filtering Logic
+  const auditFilteredData = React.useMemo(() => {
+    if (!auditDate) return [];
+    const dateKey = format(auditDate, "yyyy-MM-dd");
+    const isPastDate = startOfDay(auditDate) < startOfDay(new Date());
+    
+    return students.filter(student => {
+      const matchesClass = selectedClass === "All" || student.className === selectedClass;
+      const matchesSearch = student.name.toLowerCase().includes(auditSearchQuery.toLowerCase()) || 
+                            student.rollNo?.toString().includes(auditSearchQuery);
+      
+      let status = student.attendance?.[dateKey] || "no-record";
+      if (status === "no-record" && isPastDate) status = "absent";
+
+      const matchesStatus = auditStatusFilter === "all" || status === auditStatusFilter;
+      
+      return matchesClass && matchesSearch && matchesStatus;
+    }).map(student => {
+      let status = student.attendance?.[dateKey] || "no-record";
+      if (status === "no-record" && isPastDate) {
+        status = "absent";
+      }
+      return { ...student, status };
+    });
+  }, [students, auditDate, selectedClass, auditSearchQuery, auditStatusFilter]);
+
+  const auditStats = React.useMemo(() => {
+    return {
+      total: auditFilteredData.length,
+      present: auditFilteredData.filter(d => d.status === "present").length,
+      absent: auditFilteredData.filter(d => d.status === "absent").length,
+    };
+  }, [auditFilteredData]);
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[92vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-white/10 shadow-2xl rounded-3xl">
+      <DialogContent className="max-w-7xl h-[92vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-white/10 shadow-2xl rounded-3xl">
         <DialogHeader className="px-10 pt-24 pb-8 border-b border-white/5 bg-slate-900/50 backdrop-blur-3xl relative shrink-0">
           <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-[100px] -mr-32 -mt-32" />
           
           <button 
-            onClick={handleBack}
+            onClick={() => onOpenChange(false)}
             className="absolute top-8 left-8 z-[160] h-10 px-4 bg-primary/5 hover:bg-primary/10 border border-primary/10 rounded-xl flex items-center gap-2 text-primary hover:text-primary/80 transition-all active:scale-95 shadow-lg"
           >
             <ChevronLeft className="h-5 w-5" />
@@ -340,12 +448,18 @@ export function AttendanceReportDialog({
         <ScrollArea className="flex-1">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <div className="px-10 py-6 bg-slate-900/30 border-b border-white/5 flex flex-wrap items-center justify-between gap-6">
-                <TabsList className="grid grid-cols-2 w-[320px] bg-slate-800/50 p-1 rounded-xl">
-                    <TabsTrigger value="class-view" className="gap-2 text-xs font-black uppercase italic tracking-widest data-[state=active]:bg-primary data-[state=active]:text-white transition-all">
-                        <Users className="h-4 w-4" /> Class View
+                <TabsList className="grid grid-cols-4 w-[600px] bg-slate-800/50 p-1 rounded-xl">
+                    <TabsTrigger value="class-view" className="gap-2 text-[10px] font-black uppercase italic tracking-widest data-[state=active]:bg-primary data-[state=active]:text-white transition-all">
+                        <Users className="h-3.5 w-3.5" /> Summary
                     </TabsTrigger>
-                    <TabsTrigger value="student-view" className="gap-2 text-xs font-black uppercase italic tracking-widest data-[state=active]:bg-primary data-[state=active]:text-white transition-all">
-                        <User className="h-4 w-4" /> Student View
+                    <TabsTrigger value="student-view" className="gap-2 text-[10px] font-black uppercase italic tracking-widest data-[state=active]:bg-primary data-[state=active]:text-white transition-all">
+                        <User className="h-3.5 w-3.5" /> Profiles
+                    </TabsTrigger>
+                    <TabsTrigger value="register-view" className="gap-2 text-[10px] font-black uppercase italic tracking-widest data-[state=active]:bg-primary data-[state=active]:text-white transition-all">
+                        <BookMarked className="h-3.5 w-3.5" /> Register
+                    </TabsTrigger>
+                    <TabsTrigger value="audit-view" className="gap-2 text-[10px] font-black uppercase italic tracking-widest data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
+                        <History className="h-3.5 w-3.5" /> Audit Log
                     </TabsTrigger>
                 </TabsList>
                 
@@ -521,20 +635,20 @@ export function AttendanceReportDialog({
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                                 <Card className="bg-slate-900/60 border-white/5 p-8 text-center rounded-3xl shadow-2xl group transition-all hover:border-primary/20">
                                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Tracked Days</p>
-                                    <p className="text-5xl font-black italic tracking-tighter text-white">{Object.keys(selectedStudent.attendance).length}</p>
+                                    <p className="text-5xl font-black italic tracking-tighter text-white">{Object.keys(selectedStudent.attendance || {}).length}</p>
                                 </Card>
                                 <Card className="bg-slate-900/60 border-emerald-500/20 p-8 text-center rounded-3xl shadow-2xl group transition-all hover:bg-emerald-500/5">
                                     <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-2">Present Count</p>
-                                    <p className="text-5xl font-black italic tracking-tighter text-emerald-500">{Object.values(selectedStudent.attendance).filter(v => v === 'present').length}</p>
+                                    <p className="text-5xl font-black italic tracking-tighter text-emerald-500">{Object.values(selectedStudent.attendance || {}).filter(v => v === 'present').length}</p>
                                 </Card>
                                 <Card className="bg-slate-900/60 border-rose-500/20 p-8 text-center rounded-3xl shadow-2xl group transition-all hover:bg-rose-500/5">
                                     <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest mb-2">Absent Count</p>
-                                    <p className="text-5xl font-black italic tracking-tighter text-rose-500">{Object.values(selectedStudent.attendance).filter(v => v === 'absent').length}</p>
+                                    <p className="text-5xl font-black italic tracking-tighter text-rose-500">{Object.values(selectedStudent.attendance || {}).filter(v => v === 'absent').length}</p>
                                 </Card>
                                 <Card className="bg-primary p-8 text-center rounded-3xl shadow-[0_15px_40px_rgba(59,130,246,0.3)]">
                                     <p className="text-[10px] font-black text-primary-foreground uppercase tracking-widest opacity-80 mb-2">Consistency Score</p>
                                     <p className="text-5xl font-black italic tracking-tighter text-white">
-                                        {((Object.values(selectedStudent.attendance).filter(v => v === 'present').length / (Object.keys(selectedStudent.attendance).length || 1)) * 100).toFixed(1)}%
+                                        {((Object.values(selectedStudent.attendance || {}).filter(v => v === 'present').length / (Object.keys(selectedStudent.attendance || {}).length || 1)) * 100).toFixed(1)}%
                                     </p>
                                 </Card>
                             </div>
@@ -591,6 +705,165 @@ export function AttendanceReportDialog({
                             <p className="text-sm font-medium uppercase tracking-[0.3em] mt-2 opacity-50">Use the filters above to browse student records.</p>
                         </div>
                     )}
+                </TabsContent>
+
+                <TabsContent value="register-view" className="m-0 space-y-10 outline-none pb-10">
+                    <div className="bg-slate-900/60 border border-white/5 p-10 rounded-[3rem] shadow-2xl flex flex-col md:flex-row items-center gap-10">
+                        <div className="p-8 bg-primary/10 rounded-[2.5rem] border border-primary/20 shrink-0">
+                            <BookMarked className="h-20 w-20 text-primary" />
+                        </div>
+                        <div className="flex-1 space-y-6">
+                            <div>
+                                <h3 className="text-3xl font-black italic uppercase tracking-tighter text-white">Full Monthly Register</h3>
+                                <p className="text-slate-400 font-medium leading-relaxed">
+                                    Download a complete attendance grid for all students in a class. The sheet includes roll numbers, names, and daily P/A status for the entire month.
+                                </p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">SELECT TARGET MONTH</label>
+                                    <div className="flex gap-3">
+                                        <Select onValueChange={(v) => setSelectedMonth(Number(v))} value={String(selectedMonth)}>
+                                            <SelectTrigger className="h-12 bg-slate-800 border-white/10 text-white font-bold rounded-xl"><SelectValue /></SelectTrigger>
+                                            <SelectContent className="bg-slate-950 border-white/10 text-white">{MONTHS.map((m, i) => <SelectItem key={m} value={String(i)}>{m}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                        <Select onValueChange={(v) => setSelectedYear(Number(v))} value={String(selectedYear)}>
+                                            <SelectTrigger className="h-12 bg-slate-800 border-white/10 text-white font-bold rounded-xl"><SelectValue /></SelectTrigger>
+                                            <SelectContent className="bg-slate-950 border-white/10 text-white">{getYears().map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest ml-1">DOWNLOAD TERMINAL</label>
+                                    <Button 
+                                        onClick={exportRegisterToExcel} 
+                                        disabled={!selectedClass} 
+                                        className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 text-white font-black italic uppercase tracking-widest rounded-xl shadow-xl shadow-emerald-900/20"
+                                    >
+                                        <Download className="mr-2 h-4 w-4" /> GENERATE & EXPORT REGISTER
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </TabsContent>
+
+                <TabsContent value="audit-view" className="m-0 space-y-10 outline-none pb-10">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-slate-900/40 p-8 rounded-[2.5rem] border border-white/5">
+                        <div className="max-w-md">
+                            <h3 className="text-2xl font-black italic uppercase tracking-tighter text-white">Forensic Audit Log</h3>
+                            <p className="text-slate-400 font-medium leading-relaxed italic">
+                                Instant database lookup for any student record. Filter by status to find specific entries.
+                            </p>
+                        </div>
+                        <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-2xl border border-white/5 backdrop-blur-xl">
+                            <Popover>
+                                <PopoverTrigger asChild>
+                                    <Button variant="ghost" className="h-12 px-6 bg-white/5 border border-white/10 rounded-xl text-white font-black italic uppercase tracking-tighter hover:bg-white/10 transition-all">
+                                        <CalendarIcon className="mr-2 h-4 w-4 text-emerald-500" />
+                                        {auditDate ? format(auditDate, "MMMM do, yyyy") : "Pick Date"}
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-auto p-0 bg-slate-900 border-white/10" align="end">
+                                    <Calendar mode="single" selected={auditDate} onSelect={setAuditDate} initialFocus className="bg-slate-900 text-white" />
+                                </PopoverContent>
+                            </Popover>
+                            <Select value={auditStatusFilter} onValueChange={setAuditStatusFilter}>
+                                <SelectTrigger className="w-[150px] h-12 bg-white/5 border-white/10 rounded-xl text-white font-black italic uppercase tracking-tighter focus:ring-emerald-500">
+                                    <Filter className="mr-2 h-4 w-4 text-emerald-500" />
+                                    <SelectValue placeholder="All Status" />
+                                </SelectTrigger>
+                                <SelectContent className="bg-slate-950 border-white/10 text-white">
+                                    <SelectItem value="all">All Status</SelectItem>
+                                    <SelectItem value="present">Present</SelectItem>
+                                    <SelectItem value="absent">Absent</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-emerald-500/5 rounded-3xl p-6 border border-emerald-500/20 flex flex-col justify-between group hover:bg-emerald-500/10 transition-all">
+                            <span className="text-[10px] font-black text-emerald-500/50 uppercase tracking-widest mb-4">MATCHED PRESENT</span>
+                            <span className="text-4xl font-black text-emerald-500 italic tracking-tighter">{auditStats.present}</span>
+                        </div>
+                        <div className="bg-rose-500/5 rounded-3xl p-6 border border-rose-500/20 flex flex-col justify-between group hover:bg-rose-500/10 transition-all">
+                            <span className="text-[10px] font-black text-rose-500/50 uppercase tracking-widest mb-4">MATCHED ABSENT</span>
+                            <span className="text-4xl font-black text-rose-500 italic tracking-tighter">{auditStats.absent}</span>
+                        </div>
+                        <div className="bg-white/5 rounded-3xl p-6 border border-white/5 flex flex-col justify-between group hover:border-primary/30 transition-all">
+                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">TOTAL AUDITED</span>
+                            <span className="text-4xl font-black text-white italic tracking-tighter">{auditStats.total}</span>
+                        </div>
+                    </div>
+
+                    <div className="relative group">
+                        <Search className="absolute left-6 top-5 h-6 w-6 text-emerald-500/50 group-focus-within:text-emerald-500 transition-colors" />
+                        <Input 
+                            placeholder="Search student in audit log..." 
+                            className="h-16 pl-16 bg-slate-900/60 border-white/10 text-white placeholder:text-slate-600 focus:border-emerald-500/50 focus:ring-emerald-500/20 text-2xl font-bold italic rounded-3xl shadow-2xl transition-all"
+                            value={auditSearchQuery}
+                            onChange={(e) => setAuditSearchQuery(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
+                        {auditFilteredData.length > 0 ? (
+                            auditFilteredData.map((student) => (
+                                <div key={student.id} className="group relative bg-slate-900/40 border border-white/5 rounded-[2.5rem] p-8 hover:border-emerald-500/30 transition-all duration-500 shadow-xl overflow-hidden">
+                                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-emerald-500/10 transition-all" />
+                                    <div className="flex items-center justify-between mb-8 relative z-10">
+                                        <div className="flex items-center gap-6">
+                                            <div className="h-16 w-16 rounded-2xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 text-emerald-500 text-2xl font-black italic shadow-inner group-hover:scale-110 transition-transform">
+                                                {student.rollNo}
+                                            </div>
+                                            <div>
+                                                <h4 className="text-2xl font-black italic tracking-tighter text-white uppercase group-hover:text-emerald-400 transition-colors leading-none mb-2">
+                                                    {student.name}
+                                                </h4>
+                                                <p className="text-[11px] text-slate-500 font-bold uppercase tracking-[0.2em] bg-white/5 w-fit px-3 py-1 rounded-lg">
+                                                    Class: {student.className}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-col items-end gap-1">
+                                            {student.status === "present" ? (
+                                                <Badge className="bg-emerald-500 text-white font-black italic uppercase tracking-widest text-[10px] px-5 py-2 rounded-full shadow-[0_0_25px_rgba(16,185,129,0.4)] border-none">
+                                                    <CheckCircle2 className="h-3 w-3 mr-2" /> Present
+                                                </Badge>
+                                            ) : (
+                                                <Badge className="bg-rose-500 text-white font-black italic uppercase tracking-widest text-[10px] px-5 py-2 rounded-full shadow-[0_0_25px_rgba(244,63,94,0.4)] border-none">
+                                                    <XCircle className="h-3 w-3 mr-2" /> Absent
+                                                </Badge>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-6 border-t border-white/5 relative z-10">
+                                        <div className="flex items-center gap-2">
+                                            <div className="h-2 w-2 rounded-full bg-emerald-500/50 animate-pulse" />
+                                            <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">VERIFIED RECORD</span>
+                                        </div>
+                                        <Button 
+                                          variant="ghost" 
+                                          size="sm" 
+                                          className="h-10 px-6 text-[11px] font-black text-emerald-500 uppercase tracking-widest hover:bg-emerald-500/10 hover:text-emerald-400 transition-all rounded-xl group/btn"
+                                          onClick={() => {
+                                              setActiveTab("student-view");
+                                              setSelectedStudentId(student.id);
+                                          }}
+                                        >
+                                            OPEN PROFILE <ArrowRight className="ml-2 h-4 w-4 group-hover/btn:translate-x-1 transition-transform" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="col-span-full py-32 text-center opacity-30">
+                                <History className="h-20 w-20 mx-auto mb-6" />
+                                <p className="text-2xl font-black uppercase italic tracking-widest">No matching records for this date</p>
+                            </div>
+                        )}
+                    </div>
                 </TabsContent>
             </div>
           </Tabs>

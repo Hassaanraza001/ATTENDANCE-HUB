@@ -1,3 +1,4 @@
+
 "use client";
 
 import * as React from "react";
@@ -24,14 +25,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { Student } from "@/lib/types";
-import { Loader2, Fingerprint, CheckCircle2, AlertCircle } from "lucide-react";
+import { Loader2, Fingerprint, CheckCircle2, AlertCircle, UserPlus, ArrowRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { cn } from "@/lib/utils";
 
 const studentFormSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters."),
   phone: z.string().regex(/^\d{10}$/, "Phone number must be 10 digits."),
-  className: z.string().min(3, "Class name must be at least 3 characters."),
+  className: z.string().min(1, "Class name is required."),
 });
 
 type AddStudentDialogProps = {
@@ -60,6 +61,7 @@ export function AddStudentDialog({
   appState,
 }: AddStudentDialogProps) {
   const [currentStep, setCurrentStep] = React.useState(1);
+  const [justAdded, setJustAdded] = React.useState(false);
   
   const form = useForm<z.infer<typeof studentFormSchema>>({
     resolver: zodResolver(studentFormSchema),
@@ -70,15 +72,19 @@ export function AddStudentDialog({
     },
   });
   
-  // Reset state when dialog is opened or closed
+  // Reset when opening
   React.useEffect(() => {
-    if (!isOpen) {
-      setTimeout(() => { // delay to allow animation to finish
-        form.reset();
+    if (isOpen) {
+      if (studentToEnroll) {
+        setCurrentStep(2);
+        setJustAdded(false);
+      } else {
         setCurrentStep(1);
-      }, 300);
+        setJustAdded(false);
+        form.reset();
+      }
     }
-  }, [isOpen, form]);
+  }, [isOpen, studentToEnroll, form]);
 
   async function onSubmit(values: z.infer<typeof studentFormSchema>) {
     const isDuplicate = allStudents.some(student => student.phone === `+91${values.phone}`);
@@ -94,72 +100,98 @@ export function AddStudentDialog({
     
     const addedStudent = await onStudentAdded(newStudent);
     if (addedStudent) {
-      setCurrentStep(2); // Move to enrollment step
+      setJustAdded(true);
+      // We stay on Step 1 but show success and a button to "Proceed to Enroll" or "Add Another"
     }
   }
 
   const renderStep1 = () => (
     <>
       <DialogHeader>
-        <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase">Add New Student <span className="text-primary">(Step 1 of 2)</span></DialogTitle>
+        <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase">
+          {justAdded ? "Student Added!" : "Register Student Node"}
+        </DialogTitle>
         <DialogDescription>
-          Enter basic details to initialize the student node.
+          {justAdded 
+            ? "Details saved successfully. Roll number assigned automatically." 
+            : "Enter student details to register in the local roster."}
         </DialogDescription>
       </DialogHeader>
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
-          <FormField
-            control={form.control}
-            name="name"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Full Name</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. John Doe" {...field} disabled={isAdding} className="bg-slate-900/50 border-white/5 rounded-xl h-11" />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="phone"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Parent's Phone Number</FormLabel>
-                <FormControl>
-                  <div className="flex items-center">
-                      <span className="inline-flex items-center px-4 text-xs font-black bg-slate-800 border border-r-0 border-white/5 rounded-l-xl h-11 text-primary">
-                          +91
-                      </span>
-                      <Input placeholder="1234567890" {...field} className="rounded-l-none rounded-r-xl h-11 bg-slate-900/50 border-white/5" disabled={isAdding}/>
-                  </div>
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="className"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Class Identifier</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. Grade 10A" {...field} disabled={isAdding} className="bg-slate-900/50 border-white/5 rounded-xl h-11" />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <DialogFooter className="pt-4">
-            <Button type="submit" disabled={isAdding} className="w-full h-12 bg-primary hover:bg-primary/90 font-black italic uppercase rounded-xl shadow-xl shadow-primary/20 transition-all">
-              {isAdding && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              INITIATE ENROLLMENT
-            </Button>
-          </DialogFooter>
-        </form>
-      </Form>
+
+      {justAdded ? (
+        <div className="py-10 space-y-6">
+          <div className="bg-emerald-500/10 border border-emerald-500/20 p-6 rounded-2xl flex flex-col items-center gap-4 text-center">
+             <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+             <div className="space-y-1">
+                <p className="text-lg font-black text-white uppercase italic">{form.getValues('name')}</p>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Successfully registered</p>
+             </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4">
+              <Button onClick={() => setCurrentStep(2)} className="h-14 bg-primary hover:bg-primary/90 rounded-xl font-black italic uppercase">
+                 <Fingerprint className="mr-2 h-5 w-5" /> Enroll Biometrics Now
+              </Button>
+              <Button variant="ghost" onClick={() => { setJustAdded(false); form.reset(); }} className="h-14 border border-white/5 rounded-xl font-black italic uppercase text-slate-500">
+                 <UserPlus className="mr-2 h-5 w-5" /> Add Another Student
+              </Button>
+          </div>
+        </div>
+      ) : (
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Full Name</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. John Doe" {...field} disabled={isAdding} className="bg-slate-900/50 border-white/5 rounded-xl h-11" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="phone"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Parent's Phone Number</FormLabel>
+                  <FormControl>
+                    <div className="flex items-center">
+                        <span className="inline-flex items-center px-4 text-xs font-black bg-slate-800 border border-r-0 border-white/5 rounded-l-xl h-11 text-primary">
+                            +91
+                        </span>
+                        <Input placeholder="1234567890" {...field} className="rounded-l-none rounded-r-xl h-11 bg-slate-900/50 border-white/5" disabled={isAdding}/>
+                    </div>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="className"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500">Class Identifier</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. Grade 10A" {...field} disabled={isAdding} className="bg-slate-900/50 border-white/5 rounded-xl h-11" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <DialogFooter className="pt-4">
+              <Button type="submit" disabled={isAdding} className="w-full h-12 bg-primary hover:bg-primary/90 font-black italic uppercase rounded-xl shadow-xl shadow-primary/20 transition-all">
+                {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                ADD TO ROSTER
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      )}
     </>
   );
 
@@ -169,7 +201,7 @@ export function AddStudentDialog({
   const renderStep2 = () => (
     <>
       <DialogHeader>
-        <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase">Biometric Link <span className="text-primary">(Step 2 of 2)</span></DialogTitle>
+        <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase">Biometric Link <span className="text-primary">(Step 2)</span></DialogTitle>
         <DialogDescription>
           Linking student: <span className="font-bold text-white uppercase italic">{studentToEnroll?.name}</span>
         </DialogDescription>
@@ -220,7 +252,7 @@ export function AddStudentDialog({
                 ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                 : <Fingerprint className="mr-2 h-5 w-5" />
               }
-              {appState === 'enrolling' ? 'COMMUNICATING...' : 'START BIOMETRIC SCAN'}
+              {appState === 'enrolling' ? 'COMMUNICATING...' : 'START DUAL-FINGER SCAN'}
             </Button>
         )}
          <div className="flex items-center justify-center gap-3 py-2">

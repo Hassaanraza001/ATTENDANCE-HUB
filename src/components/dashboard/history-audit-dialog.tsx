@@ -1,8 +1,9 @@
+
 "use client";
 
 import * as React from "react";
 import type { Student } from "@/lib/types";
-import { format } from "date-fns";
+import { format, startOfDay } from "date-fns";
 import { 
   History, 
   Search, 
@@ -14,7 +15,8 @@ import {
   SearchCode,
   Zap,
   ArrowRight,
-  ChevronLeft
+  ChevronLeft,
+  Users2
 } from "lucide-react";
 import { 
   Dialog, 
@@ -36,6 +38,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 type HistoryAuditDialogProps = {
@@ -56,21 +59,35 @@ export function HistoryAuditDialog({
   const [selectedDate, setSelectedDate] = React.useState<Date | undefined>(new Date());
   const [selectedClass, setSelectedClass] = React.useState<string>("All");
   const [searchQuery, setSearchQuery] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState<string>("all");
 
   const filteredData = React.useMemo(() => {
     if (!selectedDate) return [];
     const dateKey = format(selectedDate, "yyyy-MM-dd");
+    const isPastDate = startOfDay(selectedDate) < startOfDay(new Date());
     
     return students.filter(student => {
       const matchesClass = selectedClass === "All" || student.className === selectedClass;
       const matchesSearch = student.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             student.rollNo?.toString().includes(searchQuery);
-      return matchesClass && matchesSearch;
-    }).map(student => ({
-      ...student,
-      status: student.attendance?.[dateKey] || "no-record"
-    }));
-  }, [students, selectedDate, selectedClass, searchQuery]);
+      
+      let status = student.attendance?.[dateKey] || "no-record";
+      if (status === "no-record" && isPastDate) status = "absent";
+
+      const matchesStatus = statusFilter === "all" || status === statusFilter;
+      
+      return matchesClass && matchesSearch && matchesStatus;
+    }).map(student => {
+      let status = student.attendance?.[dateKey] || "no-record";
+      if (status === "no-record" && isPastDate) {
+        status = "absent";
+      }
+      return {
+        ...student,
+        status
+      };
+    });
+  }, [students, selectedDate, selectedClass, searchQuery, statusFilter]);
 
   const stats = React.useMemo(() => {
     return {
@@ -83,7 +100,7 @@ export function HistoryAuditDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[92vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-white/10 shadow-[0_0_100px_rgba(0,0,0,1)] rounded-[3rem]">
+      <DialogContent className="max-w-7xl h-[92vh] flex flex-col p-0 overflow-hidden bg-slate-950 border-white/10 shadow-[0_0_100px_rgba(0,0,0,1)] rounded-[3rem]">
         <DialogHeader className="px-10 pt-24 pb-6 border-b border-white/5 bg-slate-900/50 backdrop-blur-3xl relative overflow-hidden shrink-0">
           <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-[100px] -mr-32 -mt-32" />
           
@@ -107,6 +124,16 @@ export function HistoryAuditDialog({
                 </DialogTitle>
                 <DialogDescription className="hidden">Audit student attendance records across classes and dates.</DialogDescription>
             </div>
+            
+            <div className="flex bg-slate-800/50 p-1.5 rounded-2xl border border-white/5">
+                <Tabs value={statusFilter} onValueChange={setStatusFilter} className="w-full">
+                    <TabsList className="bg-transparent gap-2 h-10">
+                        <TabsTrigger value="all" className="rounded-xl px-6 text-[10px] font-black uppercase italic data-[state=active]:bg-primary data-[state=active]:text-white">All</TabsTrigger>
+                        <TabsTrigger value="present" className="rounded-xl px-6 text-[10px] font-black uppercase italic data-[state=active]:bg-emerald-500 data-[state=active]:text-white">Present</TabsTrigger>
+                        <TabsTrigger value="absent" className="rounded-xl px-6 text-[10px] font-black uppercase italic data-[state=active]:bg-rose-500 data-[state=active]:text-white">Absent</TabsTrigger>
+                    </TabsList>
+                </Tabs>
+            </div>
           </div>
         </DialogHeader>
 
@@ -116,7 +143,7 @@ export function HistoryAuditDialog({
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-slate-900/40 p-8 rounded-[2.5rem] border border-white/5">
                 <div className="max-w-md">
                     <p className="text-slate-400 font-medium text-lg leading-relaxed italic">
-                        Instant database lookup for any student record across the entire institution.
+                        Instant database lookup for any student record. Filter by status to find specific entries.
                     </p>
                 </div>
                 <div className="flex items-center gap-3 bg-slate-800/50 p-2 rounded-2xl border border-white/5 backdrop-blur-xl">
@@ -149,15 +176,15 @@ export function HistoryAuditDialog({
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 <div className="bg-white/5 rounded-3xl p-6 border border-white/5 flex flex-col justify-between group hover:border-primary/30 transition-all">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">DATABASE SCOPE</span>
-                    <span className="text-4xl font-black text-white italic tracking-tighter">{stats.total} TOTAL</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">TOTAL FILTERED</span>
+                    <span className="text-4xl font-black text-white italic tracking-tighter">{filteredData.length} NODES</span>
                 </div>
                 <div className="bg-emerald-500/5 rounded-3xl p-6 border border-emerald-500/20 flex flex-col justify-between group hover:bg-emerald-500/10 transition-all">
-                    <span className="text-[10px] font-black text-emerald-500/50 uppercase tracking-widest mb-4">VERIFIED PRESENT</span>
+                    <span className="text-[10px] font-black text-emerald-500/50 uppercase tracking-widest mb-4">MATCHED PRESENT</span>
                     <span className="text-4xl font-black text-emerald-500 italic tracking-tighter">{stats.present}</span>
                 </div>
                 <div className="bg-rose-500/5 rounded-3xl p-6 border border-rose-500/20 flex flex-col justify-between group hover:bg-rose-500/10 transition-all">
-                    <span className="text-[10px] font-black text-rose-500/50 uppercase tracking-widest mb-4">MISSING ATTENDANCE</span>
+                    <span className="text-[10px] font-black text-rose-500/50 uppercase tracking-widest mb-4">MATCHED ABSENT</span>
                     <span className="text-4xl font-black text-rose-500 italic tracking-tighter">{stats.absent}</span>
                 </div>
                 <div className="bg-slate-500/5 rounded-3xl p-6 border border-white/5 flex flex-col justify-between opacity-60">
@@ -260,3 +287,4 @@ export function HistoryAuditDialog({
     </Dialog>
   );
 }
+
