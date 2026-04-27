@@ -105,7 +105,7 @@ const BootingScreen = () => {
           </div>
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-2 text-emerald-400 font-mono text-[10px] font-black italic">
-               <div className="h-1 w-1 rounded-full bg-emerald-500 animate-ping" />
+               <div className="h-1  w-1 rounded-full bg-emerald-500 animate-ping" />
                SYSTEM INITIALIZED
             </div>
             <p className="text-white/20 text-[9px] font-black uppercase tracking-[0.3em]">{progress}% LOADED</p>
@@ -163,6 +163,13 @@ export default function AndroidAppPage() {
     });
     return unsub;
   }, [auth, router]);
+
+  // RESET appState when hardware returns to IDLE
+  useEffect(() => {
+    if (deviceStatus?.enrollment_status === "IDLE" && appState === "enrolling") {
+      setAppState("idle");
+    }
+  }, [deviceStatus?.enrollment_status, appState]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -299,7 +306,7 @@ export default function AndroidAppPage() {
             </div>
         </div>
 
-        <div className="relative bg-slate-900/30 rounded-[2rem] border border-white/5 p-6 overflow-hidden">
+        <div className="relative bg-slate-900/30 rounded-[3rem] border border-white/5 p-6 overflow-hidden">
           <div className="relative z-10 space-y-4">
             <div className="flex items-center gap-2 text-primary bg-primary/10 w-fit px-3 py-0.5 rounded-full border border-primary/20">
               <Sparkles className="h-3 w-3 animate-pulse" />
@@ -463,7 +470,11 @@ export default function AndroidAppPage() {
       </Dialog>
 
       <AddStudentDialog 
-        isOpen={isAddStudentDialogOpen} onOpenChange={setIsAddStudentDialogOpen} 
+        isOpen={isAddStudentDialogOpen} 
+        onOpenChange={(open) => {
+          setIsAddStudentDialogOpen(open);
+          if (!open) setAppState("idle");
+        }} 
         onStudentAdded={async (d) => {
           if (!currentUser) return null;
           const sId = await addStudent(currentUser.uid, {...d, rollNo: 0, attendance: {}, userId: currentUser.uid, fingerprintID: 'NOT_ENROLLED'});

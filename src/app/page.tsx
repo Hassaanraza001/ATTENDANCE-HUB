@@ -163,6 +163,13 @@ export default function DashboardPage() {
     return unsub;
   }, [auth, router]);
 
+  // RESET appState when hardware returns to IDLE
+  useEffect(() => {
+    if (deviceStatus?.enrollment_status === "IDLE" && appState === "enrolling") {
+      setAppState("idle");
+    }
+  }, [deviceStatus?.enrollment_status, appState]);
+
   useEffect(() => {
     if (!currentUser) return;
     const initData = async () => {
@@ -416,7 +423,34 @@ export default function DashboardPage() {
         </DialogContent>
       </Dialog>
 
-      <AddStudentDialog isOpen={isAddStudentDialogOpen} onOpenChange={setIsAddStudentDialogOpen} onStudentAdded={async (d) => { if (!currentUser) return null; const classStudents = allStudents.filter(s => s.className === d.className); const maxRoll = classStudents.reduce((max, s) => Math.max(max, s.rollNo || 0), 0); const sId = await addStudent(currentUser.uid, { ...d, rollNo: maxRoll + 1, attendance: {}, userId: currentUser.uid, fingerprintID: 'NOT_ENROLLED' }); const finalStudent = {id: sId, ...d, rollNo: maxRoll + 1, attendance: {}, userId: currentUser.uid, fingerprintID: 'NOT_ENROLLED'}; setStudentToEnroll(finalStudent); return finalStudent; }} isAdding={isPending} allStudents={allStudents} studentToEnroll={studentToEnroll} onEnroll={(s) => { addDoc(collection(db, "kiosk_commands"), { type: "ENROLL", studentId: s.id, studentName: s.name, deviceId: deviceStatus?.deviceId, status: "pending", createdAt: serverTimestamp(), userId: currentUser?.uid }); setAppState("enrolling"); }} enrollmentStatus={deviceStatus?.enrollment_status} arduinoStatus={{ connected: isDeviceOnline || false, message: isDeviceOnline ? "Online" : "Offline" }} appState={appState} />
+      <AddStudentDialog 
+        isOpen={isAddStudentDialogOpen} 
+        onOpenChange={(open) => {
+          setIsAddStudentDialogOpen(open);
+          if (!open) setAppState("idle");
+        }} 
+        onStudentAdded={async (d) => { 
+          if (!currentUser) return null; 
+          const classStudents = allStudents.filter(s => s.className === d.className); 
+          const maxRoll = classStudents.reduce((max, s) => Math.max(max, s.rollNo || 0), 0); 
+          const sId = await addStudent(currentUser.uid, { ...d, rollNo: maxRoll + 1, attendance: {}, userId: currentUser.uid, fingerprintID: 'NOT_ENROLLED' }); 
+          const finalStudent = {id: sId, ...d, rollNo: maxRoll + 1, attendance: {}, userId: currentUser.uid, fingerprintID: 'NOT_ENROLLED'}; 
+          setStudentToEnroll(finalStudent); 
+          return finalStudent; 
+        }} 
+        isAdding={isPending} 
+        allStudents={allStudents} 
+        studentToEnroll={studentToEnroll} 
+        onEnroll={(s) => { 
+          addDoc(collection(db, "kiosk_commands"), { 
+            type: "ENROLL", studentId: s.id, studentName: s.name, deviceId: deviceStatus?.deviceId, status: "pending", createdAt: serverTimestamp(), userId: currentUser?.uid 
+          }); 
+          setAppState("enrolling"); 
+        }} 
+        enrollmentStatus={deviceStatus?.enrollment_status} 
+        arduinoStatus={{ connected: isDeviceOnline || false, message: isDeviceOnline ? "Online" : "Offline" }} 
+        appState={appState} 
+      />
       <EditStudentDialog student={studentToEdit} isOpen={!!studentToEdit} onOpenChange={() => setStudentToEdit(null)} onStudentUpdated={(s) => currentUser && updateStudent(currentUser.uid, s.id, s)} isUpdating={isPending} />
       <AttendanceCalendarDialog student={selectedStudentForCalendar} isOpen={!!selectedStudentForCalendar} onOpenChange={() => setSelectedStudentForCalendar(null)} />
       <AttendanceReportDialog isOpen={isReportDialogOpen} onOpenChange={setIsReportDialogOpen} students={allStudents} classNames={classNames} onStudentSelect={setSelectedStudentForCalendar} />
