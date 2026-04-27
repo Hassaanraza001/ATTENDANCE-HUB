@@ -28,6 +28,7 @@ import { DeviceCenterDialog } from "@/components/dashboard/hardware-management-d
 import { HistoryAuditDialog } from "@/components/dashboard/history-audit-dialog";
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { 
   ExternalLink, 
   ShieldCheck, 
@@ -49,7 +50,9 @@ import {
   BookOpen,
   Clock,
   Cpu,
-  Smartphone
+  Smartphone,
+  Search,
+  Filter
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -242,7 +245,7 @@ export default function AndroidAppPage() {
     let studentsByClass = students;
     if (selectedClass !== "All") studentsByClass = students.filter(s => s.className === selectedClass);
     if (!searchQuery) return studentsByClass;
-    return studentsByClass.filter(s => s.name?.toLowerCase().includes(searchQuery.toLowerCase()));
+    return studentsByClass.filter(s => s.name?.toLowerCase().includes(searchQuery.toLowerCase()) || s.rollNo?.toString().includes(searchQuery));
   }, [students, selectedClass, searchQuery]);
 
   const handleStartAttendance = async (type: AttendanceType) => {
@@ -427,17 +430,30 @@ export default function AndroidAppPage() {
                <ChevronLeft className="h-4 w-4" /> BACK
             </button>
             <DialogTitle className="text-2xl font-black italic tracking-tighter uppercase text-white mt-4">STUDENT <span className="text-primary">ROSTER</span></DialogTitle>
-            <div className="flex gap-2 mt-4 overflow-x-auto pb-2 scrollbar-hide">
-                <Button size="sm" className="bg-primary rounded-xl font-black uppercase italic text-[10px]" onClick={() => setIsAddStudentDialogOpen(true)}>Add Student</Button>
-                <Select value={selectedClass} onValueChange={setSelectedClass}>
-                    <SelectTrigger className="h-9 min-w-[120px] bg-slate-800 border-white/5 text-white text-[10px] font-black uppercase rounded-xl">
-                        <SelectValue placeholder="Class" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-900 border-white/10 text-white">
-                        <SelectItem value="All">All Classes</SelectItem>
-                        {classNames.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-                    </SelectContent>
-                </Select>
+            
+            {/* SEARCH AND FILTER UI */}
+            <div className="mt-6 space-y-3">
+                <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                    <Input 
+                        placeholder="Search name or roll no..." 
+                        className="h-10 pl-10 bg-slate-800 border-white/5 text-white rounded-xl text-xs"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                    <Button size="sm" className="bg-primary rounded-xl font-black uppercase italic text-[10px] shrink-0" onClick={() => setIsAddStudentDialogOpen(true)}>Add Student</Button>
+                    <Select value={selectedClass} onValueChange={setSelectedClass}>
+                        <SelectTrigger className="h-9 min-w-[120px] bg-slate-800 border-white/5 text-white text-[10px] font-black uppercase rounded-xl">
+                            <SelectValue placeholder="Class" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-900 border-white/10 text-white">
+                            <SelectItem value="All">All Classes</SelectItem>
+                            {classNames.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
           </DialogHeader>
           <div className="flex-1 overflow-auto p-4">

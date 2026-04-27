@@ -27,6 +27,7 @@ import { ManageFacultyDialog } from "@/components/dashboard/manage-faculty-dialo
 import { DeviceCenterDialog } from "@/components/dashboard/hardware-management-dialog";
 import { ProfileSettingsDialog } from "@/components/dashboard/profile-settings-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { 
   ExternalLink, 
   Activity, 
@@ -43,7 +44,9 @@ import {
   Clock,
   Cpu,
   MessageSquare,
-  AlertCircle
+  AlertCircle,
+  Search,
+  Filter
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -398,6 +401,35 @@ export default function DashboardPage() {
               <div className="flex items-center gap-4">
                   <Button className="bg-primary hover:bg-primary/90 font-black italic uppercase h-12 px-8 rounded-2xl shadow-xl" onClick={() => { setStudentToEnroll(null); setIsAddStudentDialogOpen(true); }}><Users className="mr-2 h-5 w-5" /> Enroll Student</Button>
               </div>
+            </div>
+            
+            {/* INLINE SEARCH BAR AND CLASS FILTER */}
+            <div className="flex flex-col md:flex-row items-center gap-4 mt-8 p-4 bg-white/5 rounded-2xl border border-white/5">
+                <div className="relative flex-1 w-full">
+                    <Search className="absolute left-4 top-3.5 h-5 w-5 text-slate-500" />
+                    <Input 
+                        placeholder="Search student by name or roll number..." 
+                        className="h-12 pl-12 bg-slate-900/50 border-white/5 text-white rounded-xl focus:ring-primary"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                    <div className="p-3 bg-slate-800 rounded-xl border border-white/5 text-slate-500">
+                        <Filter className="h-5 w-5" />
+                    </div>
+                    <Select value={selectedClass} onValueChange={setSelectedClass}>
+                        <SelectTrigger className="h-12 w-full md:w-[220px] bg-slate-900/50 border-white/5 text-white font-bold uppercase italic tracking-tighter rounded-xl">
+                            <SelectValue placeholder="All Classes" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-950 border-white/10 text-white">
+                            <SelectItem value="All">All Classes</SelectItem>
+                            {classNames.filter(n => !!n).map(name => (
+                                <SelectItem key={name} value={name}>{name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
           </DialogHeader>
           <div className="flex-1 overflow-auto px-10 py-10">
